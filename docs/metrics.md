@@ -2,7 +2,11 @@
 
 Measured results only. Nothing here is estimated, projected, or copied from a
 tutorial. Every number is reproducible with the command shown above it.
+![MLflow run: 36 metrics across 7 models](images/mlflow-run.png)
 
+*Runs tracked in MLflow (SQLite backend), each pinned to the git commit that
+produced it. Artifacts — leaderboard, per-series results, summary JSON — are
+stored with the run.*
 ---
 
 ## Forecasting — price prediction
