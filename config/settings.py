@@ -58,7 +58,10 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 3600
 
     # --- mlflow ------------------------------------------------------------
-    mlflow_tracking_uri: str = "file:./mlruns"
+    # MLflow 3.15 put the filesystem store into maintenance mode -- "file:./mlruns"
+    # now raises unless MLFLOW_ALLOW_FILE_STORE=true. SQLite is the recommended
+    # local backend and swaps to Postgres/S3 in Phase 7 by changing this string.
+    mlflow_tracking_uri: str = "sqlite:///mlflow.db"
     mlflow_experiment_name: str = "pulseiq"
 
     # --- scraper -----------------------------------------------------------

@@ -60,3 +60,7 @@ Thumbs.db
 
 # --- notebooks ---
 .ipynb_checkpoints/
+mlflow.db
+mlartifacts/
+reports/*.csv
+reports/*.json

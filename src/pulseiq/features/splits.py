@@ -58,14 +58,12 @@ class Split:
                 f"empty partition: train={len(self.train)} test={len(self.test)}"
             )
 
-        train_max = self.train[DATE_COL].max()
-        test_min = self.test[DATE_COL].min()
-        if train_max >= test_min:
-            raise AssertionError(
-                f"LEAKAGE: last train date {train_max} is not before first test date {test_min}"
-            )
-
-        if GROUP_COL in self.train.columns:
+        # With a group column, correctness is defined PER PRODUCT. Products
+        # enter and leave the dataset at different times, so product A's last
+        # training date being later than product B's first test date is normal
+        # and not leakage. Comparing dates globally across a per-product split
+        # raises on perfectly valid partitions.
+        if GROUP_COL in self.train.columns and GROUP_COL in self.test.columns:
             for product, group in self.test.groupby(GROUP_COL):
                 train_group = self.train[self.train[GROUP_COL] == product]
                 if train_group.empty:
@@ -76,6 +74,15 @@ class Split:
                         f"train reaches {train_group[DATE_COL].max()}, "
                         f"test starts {group[DATE_COL].min()}"
                     )
+            return
+
+        # Ungrouped: a single global boundary is the correct check.
+        train_max = self.train[DATE_COL].max()
+        test_min = self.test[DATE_COL].min()
+        if train_max >= test_min:
+            raise AssertionError(
+                f"LEAKAGE: last train date {train_max} is not before first test date {test_min}"
+            )
 
 
 def _validate_frame(frame: pd.DataFrame) -> pd.DataFrame:

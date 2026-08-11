@@ -20,6 +20,7 @@ from pulseiq.features.build_features import (
 )
 from pulseiq.features.splits import (
     InsufficientDataError,
+    Split,
     rolling_origin_splits,
     split_by_date,
     split_by_fraction,
@@ -305,3 +306,66 @@ class TestLeakageEndToEnd:
             train_max = split.train.loc[split.train["product_name"] == product, "observed_on"].max()
             test_min = split.test.loc[split.test["product_name"] == product, "observed_on"].min()
             assert train_max < test_min
+
+
+class TestLeakageCheckIsGroupAware:
+    """Products enter and leave the dataset at different times.
+
+    A per-product split is correct even though, pooled, one product's last
+    training date can fall after another's first test date. An earlier global
+    date comparison raised on valid partitions -- caught only by fixtures with
+    staggered ranges, not by uniform ones.
+    """
+
+    @staticmethod
+    def _staggered():
+        early = pd.DataFrame(
+            {
+                "product_name": "EARLY",
+                "observed_on": pd.date_range("2024-01-01", periods=30, freq="D"),
+                "selling_price": range(30),
+            }
+        )
+        late = pd.DataFrame(
+            {
+                "product_name": "LATE",
+                "observed_on": pd.date_range("2025-01-01", periods=30, freq="D"),
+                "selling_price": range(30),
+            }
+        )
+        return pd.concat([early, late], ignore_index=True)
+
+    def test_staggered_products_do_not_raise(self):
+        split = split_per_product(self._staggered(), 0.2)
+        split.assert_no_leakage()
+        assert set(split.train["product_name"]) == {"EARLY", "LATE"}
+
+    def test_train_precedes_test_within_every_product(self):
+        split = split_per_product(self._staggered(), 0.2)
+        for product in split.test["product_name"].unique():
+            train_max = split.train.loc[split.train["product_name"] == product, "observed_on"].max()
+            test_min = split.test.loc[split.test["product_name"] == product, "observed_on"].min()
+            assert train_max < test_min
+
+    def test_real_leakage_within_a_product_is_still_caught(self):
+        """The guard must still fire on the mistake it exists to prevent."""
+        frame = self._staggered()
+        shuffled = frame[frame["product_name"] == "EARLY"].sample(frac=1.0, random_state=0)
+        bad = Split(
+            train=shuffled.iloc[:24],
+            test=shuffled.iloc[24:],
+            cutoff=pd.Timestamp("2024-01-01"),
+        )
+        with pytest.raises(AssertionError, match="LEAKAGE"):
+            bad.assert_no_leakage()
+
+    def test_ungrouped_frames_still_use_a_global_boundary(self):
+        frame = self._staggered().drop(columns=["product_name"])
+        shuffled = frame.sample(frac=1.0, random_state=0)
+        bad = Split(
+            train=shuffled.iloc[:40],
+            test=shuffled.iloc[40:],
+            cutoff=pd.Timestamp("2024-01-01"),
+        )
+        with pytest.raises(AssertionError, match="LEAKAGE"):
+            bad.assert_no_leakage()
