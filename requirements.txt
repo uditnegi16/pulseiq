@@ -1,0 +1,78 @@
+# =============================================================================
+# PulseIQ - all dependencies
+#
+#   pip install -r requirements.txt
+#   pip freeze > requirements-lock.txt    # then check for a BOM on PowerShell 5.1
+#
+# This file is the hand-maintained list of DIRECT dependencies.
+# requirements-lock.txt is the machine-generated record of exact versions
+# (including transitive deps) for reproducibility.
+# =============================================================================
+
+# --- api / app ---------------------------------------------------------------
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+streamlit
+
+# --- data --------------------------------------------------------------------
+pandas
+numpy
+pyyaml
+# plotly pinned <6: evidently requires it, and an unpinned install causes
+# repeated up/downgrade churn every time monitoring deps are touched.
+plotly<6
+
+# --- scraping ----------------------------------------------------------------
+selenium
+beautifulsoup4
+lxml
+webdriver-manager
+tenacity
+requests
+
+# --- storage -----------------------------------------------------------------
+# pymongo dropped the [srv] extra in 4.x; dnspython is a direct dependency now.
+pymongo
+dnspython
+sqlalchemy
+redis
+
+# --- classical ml / forecasting ----------------------------------------------
+scikit-learn
+statsmodels
+prophet
+mlflow
+joblib
+
+# --- monitoring --------------------------------------------------------------
+evidently
+
+# --- dev / test --------------------------------------------------------------
+pytest
+pytest-cov
+httpx
+ruff
+pre-commit
+detect-secrets
+
+# =============================================================================
+# PHASE 3 ONLY - deliberately not installed by default.
+#
+# The default torch wheel bundles CUDA (~2.5 GB) which is useless on a laptop
+# and will exhaust the CI runner's disk. Install the CPU build explicitly when
+# you reach the fine-tuning phase:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install transformers peft datasets accelerate evaluate
+#
+# Then uncomment the lines below so the file stays the single source of truth.
+# =============================================================================
+# torch
+# transformers
+# peft
+# datasets
+# accelerate
+# evaluate
