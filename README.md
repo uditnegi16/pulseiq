@@ -1,4 +1,5 @@
 # PulseIQ - Competitor Pricing & Sentiment Intelligence Engine
+[![CI](https://github.com/uditnegi16/pulseiq/actions/workflows/ci.yml/badge.svg)](https://github.com/uditnegi16/pulseiq/actions/workflows/ci.yml)
 
 Rebuild of a single-file Streamlit script into an engineered ML system:
 time-aware discount forecasting, LoRA fine-tuned review sentiment,
