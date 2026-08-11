@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["pulseiq.api.main:app", "--reload", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Streamlit dashboard",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "app/streamlit_app.py"],
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Run ingestion",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pulseiq.ingestion.run_ingest",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    }
+  ]
+}

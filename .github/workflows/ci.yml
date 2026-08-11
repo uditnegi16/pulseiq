@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/base.txt
+          pip install -r requirements/dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Secret scan
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --baseline .secrets.baseline
+
+      - name: Unit tests
+        run: pytest tests/unit -q
+
+      # Phase 4: uncomment once the eval harness exists
+      # - name: Metric regression gate
+      #   run: python -m pulseiq.evaluation.regression_gate

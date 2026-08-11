@@ -1,0 +1,62 @@
+# --- secrets (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+.secrets/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- testing / tooling ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# --- ml artifacts ---
+mlruns/
+mlartifacts/
+models/*
+!models/.gitkeep
+*.pt
+*.bin
+*.safetensors
+
+# --- data (keep folders, ignore contents) ---
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+
+# --- reports ---
+reports/drift/*
+reports/figures/*
+!reports/**/.gitkeep
+
+# --- local db ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- os / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+*.log
+
+# --- notebooks ---
+.ipynb_checkpoints/

@@ -1,0 +1,52 @@
+# =============================================================================
+# Scrape targets: selectors as configuration, not code.
+#
+# Adding or switching a site is an edit here -- no Python changes needed.
+#
+# BEFORE ADDING A SITE, CHECK ITS robots.txt (e.g. https://<site>/robots.txt)
+# and record what it permits in docs/decision-log.md. "Respected robots.txt and
+# rate limits" is a line worth being able to defend.
+# =============================================================================
+
+sites:
+  # ---------------------------------------------------------------------------
+  # books_toscrape -- a sandbox site built and licensed FOR scraping practice.
+  # Stable markup, no anti-bot, no ToS problem. Use it to prove the pipeline
+  # works end to end before pointing at anything harder.
+  # ---------------------------------------------------------------------------
+  books_toscrape:
+    base_url: "https://books.toscrape.com"
+    ready_selector: "div.product_main"
+    selectors:
+      product_name: "div.product_main > h1"
+      selling_price: "div.product_main p.price_color"
+      rating: "div.product_main p.star-rating"
+      reviews: "#product_description ~ p"
+    products:
+      - name: "A Light in the Attic"
+        url: "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+      - name: "Tipping the Velvet"
+        url: "https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html"
+      - name: "Soumission"
+        url: "https://books.toscrape.com/catalogue/soumission_998/index.html"
+
+  # ---------------------------------------------------------------------------
+  # amazon_in -- selectors ported from the original scarpe.py, converted from
+  # brittle absolute XPath to CSS.
+  #
+  # WARNING: Amazon's Terms of Service prohibit scraping, and their anti-bot
+  # will fight a Selenium session persistently. Their DOM also changes without
+  # notice, so these selectors WILL rot. Enabled only if you decide the fight
+  # is part of the story you want to tell.
+  # ---------------------------------------------------------------------------
+  amazon_in:
+    base_url: "https://www.amazon.in"
+    ready_selector: "#corePriceDisplay_desktop_feature_div"
+    selectors:
+      product_name: "#productTitle"
+      selling_price: "#corePriceDisplay_desktop_feature_div span.a-price-whole"
+      original_price: "#corePriceDisplay_desktop_feature_div span.a-text-price span.a-offscreen"
+      discount: "#corePriceDisplay_desktop_feature_div span.savingsPercentage"
+      rating: "#acrPopover span.a-size-base.a-color-base"
+      reviews: "div[data-hook='review-collapsed'] span"
+    products: []

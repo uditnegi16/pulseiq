@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+streamlit
+pandas
+numpy
+plotly
+requests
+pyyaml
