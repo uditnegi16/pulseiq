@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from datetime import date as Date
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class Sentiment(str, Enum):
+class Sentiment(StrEnum):
     """Sentiment label. Derived from star rating during dataset construction.
 
     NEGATIVE for 1-2 stars, POSITIVE for 4-5, NEUTRAL for 3. Note this is a

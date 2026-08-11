@@ -43,7 +43,7 @@ def get_client(*, uri: str | None = None, timeout_ms: int = 5000) -> Any:
     global _client
     if uri is None and not is_configured():
         raise MongoNotConfigured(
-            "MONGODB_URI is not set. Add it to .env (see .env.example) " "or run with --no-mongo."
+            "MONGODB_URI is not set. Add it to .env (see .env.example) or run with --no-mongo."
         )
 
     if uri is not None:

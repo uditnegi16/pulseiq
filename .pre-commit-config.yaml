@@ -6,7 +6,7 @@ repos:
         args: ["--baseline", ".secrets.baseline"]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
         args: ["--maxkb=5000"]
@@ -16,9 +16,21 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+  # Ruff runs from the venv (language: system) rather than a pinned mirror rev.
+  # Reason: a pinned hook rev drifts from the ruff that requirements.txt
+  # installs, so the hook passes locally while CI fails on a newer rule.
+  # This guarantees the hook and CI are always running the same binary.
+  - repo: local
     hooks:
-      - id: ruff
-        args: ["--fix"]
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true

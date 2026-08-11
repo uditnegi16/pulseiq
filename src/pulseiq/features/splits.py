@@ -62,7 +62,7 @@ class Split:
         test_min = self.test[DATE_COL].min()
         if train_max >= test_min:
             raise AssertionError(
-                f"LEAKAGE: last train date {train_max} is not before " f"first test date {test_min}"
+                f"LEAKAGE: last train date {train_max} is not before first test date {test_min}"
             )
 
         if GROUP_COL in self.train.columns:
