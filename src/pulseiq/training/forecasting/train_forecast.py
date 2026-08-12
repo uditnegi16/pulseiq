@@ -143,6 +143,9 @@ def run(
     use_prophet: bool = True,
     use_mlflow: bool = True,
     output_dir: Path = Path("reports"),
+    horizon_curve: bool = False,
+    horizons: tuple[int, ...] = (1, 3, 6, 12),
+    n_splits: int = 3,
 ) -> int:
     """Execute one full forecasting experiment. Returns a process exit code."""
     frame = (
@@ -167,6 +170,17 @@ def run(
         logger.error("no series survived resampling at freq=%s", freq)
         return 1
     print(f"\ngrid: {grid_report(grid)}")
+
+    if horizon_curve:
+        return _run_horizon_curve(
+            grid,
+            horizons=horizons,
+            n_splits=n_splits,
+            use_arima=use_arima,
+            use_prophet=use_prophet,
+            use_mlflow=use_mlflow,
+            output_dir=output_dir,
+        )
 
     try:
         split = split_per_product(grid, test_size=test_size, min_observations=min_observations + 2)
@@ -299,6 +313,87 @@ def _log_to_mlflow(*, board, report, params: dict, artifacts: list[Path]) -> Non
     logger.info("logged run to MLflow at %s", settings.mlflow_tracking_uri)
 
 
+def _run_horizon_curve(
+    grid,
+    *,
+    horizons: tuple[int, ...],
+    n_splits: int,
+    use_arima: bool,
+    use_prophet: bool,
+    use_mlflow: bool,
+    output_dir: Path,
+) -> int:
+    """Evaluate at several forecast horizons using expanding-window origins.
+
+    Answers the question a single long holdout cannot: at what distance does a
+    model stop beating the naive forecast?
+    """
+    from pulseiq.evaluation.horizon import evaluate_horizons
+
+    factories = build_factories(use_arima=use_arima, use_prophet=use_prophet)
+    print(f"evaluating {len(factories)} models at horizons {list(horizons)}...\n")
+
+    report = evaluate_horizons(grid, factories, horizons=horizons, n_splits=n_splits)
+    if not report.results:
+        logger.error("no horizon results. skipped: %s", report.skipped)
+        return 1
+
+    print(report.summary())
+
+    curve = report.curve()
+    skill = report.skill_vs_naive()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    curve_path = output_dir / "horizon_curve.csv"
+    skill_path = output_dir / "horizon_skill.csv"
+    curve.to_csv(curve_path, index=False)
+    if not skill.empty:
+        skill.to_csv(skill_path, index=False)
+    print(f"\nwrote {curve_path}")
+
+    # The headline finding: the largest horizon at which anything beats naive.
+    if not skill.empty:
+        winners = skill[skill["win_rate"] > 0.5]
+        if winners.empty:
+            print("\nVERDICT: no model beats naive_last at any tested horizon.")
+        else:
+            best_h = int(winners["horizon"].max())
+            top = winners.sort_values("win_rate", ascending=False).iloc[0]
+            print(
+                f"\nVERDICT: models beat naive_last out to h={best_h}. "
+                f"Best single result: {top['model']} at h={int(top['horizon'])} "
+                f"({top['win_rate']:.0%} win rate, "
+                f"{top['median_improvement_pct']:+.1f}% median)."
+            )
+
+    if use_mlflow:
+        try:
+            import mlflow
+
+            mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+            mlflow.set_experiment(settings.mlflow_experiment_name)
+            with mlflow.start_run(run_name="horizon_curve"):
+                mlflow.log_params(
+                    {
+                        "horizons": str(list(horizons)),
+                        "n_splits": n_splits,
+                        "use_arima": use_arima,
+                        "use_prophet": use_prophet,
+                    }
+                )
+                for row in curve.itertuples(index=False):
+                    safe = str(row.model).replace(".", "_")
+                    mlflow.log_metric(f"{safe}__mae__h{row.horizon}", float(row.mae))
+                mlflow.log_artifact(str(curve_path))
+                if not skill.empty:
+                    mlflow.log_artifact(str(skill_path))
+            logger.info("logged horizon curve to MLflow")
+        except Exception:  # noqa: BLE001
+            logger.exception("MLflow logging failed; results are still on disk")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m pulseiq.training.forecasting.train_forecast",
@@ -319,6 +414,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-prophet", action="store_true", help="much faster iteration")
     parser.add_argument("--no-mlflow", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
+    parser.add_argument(
+        "--horizon-curve",
+        action="store_true",
+        help="evaluate at h=1,3,6,12 with expanding origins instead of one long holdout",
+    )
+    parser.add_argument(
+        "--horizons",
+        type=int,
+        nargs="+",
+        default=[1, 3, 6, 12],
+        help="forecast horizons in months (used with --horizon-curve)",
+    )
+    parser.add_argument("--n-splits", type=int, default=3, help="folds per horizon")
     parser.add_argument("--log-level", default=settings.log_level)
     return parser
 
@@ -337,6 +445,9 @@ def main(argv: list[str] | None = None) -> int:
         use_prophet=not args.no_prophet,
         use_mlflow=not args.no_mlflow,
         output_dir=args.output_dir,
+        horizon_curve=args.horizon_curve,
+        horizons=tuple(args.horizons),
+        n_splits=args.n_splits,
     )
 
 

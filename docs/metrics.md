@@ -2,11 +2,7 @@
 
 Measured results only. Nothing here is estimated, projected, or copied from a
 tutorial. Every number is reproducible with the command shown above it.
-![MLflow run: 36 metrics across 7 models](images/mlflow-run.png)
 
-*Runs tracked in MLflow (SQLite backend), each pinned to the git commit that
-produced it. Artifacts — leaderboard, per-series results, summary JSON — are
-stored with the run.*
 ---
 
 ## Forecasting — price prediction
@@ -79,43 +75,106 @@ degraded naive forecast wearing another model's name.
 
 ---
 
-## Headline finding
+## Run C — horizon curve (the corrected evaluation)
 
-**No model beat the naive baseline.** Best MAE €0.055, sMAPE 3.35%, achieved by
-predicting "next month costs what this month costs".
+```
+python -m pulseiq.training.forecasting.train_forecast \
+    --source open-prices --max-series 60 --min-observations 12 \
+    --no-prophet --horizon-curve
+```
 
-This is reported as the result rather than buried, because it is very probably
-the *correct* result:
+Runs A and B used a single 20% holdout. On series spanning 2017–2026 that is a
+~36-step-ahead forecast, which can only ever show that everything converges to
+naive. This run replaces it with expanding-window origins at h = 1, 3, 6 and 12
+months — the standard way forecast skill is reported.
 
-1. **For a random walk, the naive forecast is optimal.** Retail prices are close
-   to one — flat for months, then a step change. A model beating naive by a wide
-   margin on this data would be evidence of leakage, not skill.
-2. **The evaluation horizon is long.** `test_size=0.2` on series spanning
-   2010–2026 means forecasting roughly three years ahead on a monthly grid — a
-   ~36-step horizon. No method beats naive that far out.
-3. **Ordering is sensible.** Simple methods (naive, short moving averages) beat
-   complex ones (Prophet, seasonal naive) on short, noisy, level-shifting
-   series. Prophet's yearly seasonality has little to fit when the median series
-   is 36 months long, and fitting it costs accuracy.
+Grid: 2,503 points · 56 series · 70.7% observed · median 42 points/series ·
+2017-02 → 2026-08 · **3,430 evaluations**
 
-MASE is ~2.1 for the best model: a multi-step forecast is roughly twice as hard
-as the one-step-ahead naive benchmark, which is expected and not a defect.
+### Median MAE by forecast horizon (months ahead)
+
+| model | h=1 | h=3 | h=6 | h=12 |
+|---|---|---|---|---|
+| **naive_last** | **0.0000** | **0.0100** | **0.0333** | **0.0418** |
+| arima_auto | 0.0087 | 0.0205 | 0.0428 | 0.0623 |
+| moving_average_3 | 0.0117 | 0.0300 | 0.0433 | 0.0633 |
+| drift | 0.0124 | 0.0276 | 0.0628 | 0.1000 |
+| moving_average_6 | 0.0283 | 0.0400 | 0.0527 | 0.0794 |
+| seasonal_naive_12 | 0.1050 | 0.1142 | 0.1187 | 0.1914 |
+| mean | 0.1557 | 0.1727 | 0.2073 | 0.3300 |
+
+### Paired win rate against naive_last
+
+Share of series-folds where the model had lower MAE than naive on the *same*
+partition. 50% would mean indistinguishable.
+
+| model | h=1 | h=3 | h=6 | h=12 |
+|---|---|---|---|---|
+| arima_auto | 19% | 22% | 22% | 29% |
+| drift | 16% | 21% | 24% | 28% |
+| moving_average_3 | 14% | 12% | 17% | 12% |
+| moving_average_6 | 15% | 17% | 25% | 14% |
+| seasonal_naive_12 | 12% | 11% | 17% | 9% |
+| mean | 15% | 12% | 17% | 15% |
+
+**No model exceeds 29% at any horizon.** Naive wins 71–91% of head-to-head
+comparisons. This is consistent, not marginal.
 
 ---
 
-## Known limitation of this evaluation
+## Headline finding
 
-The horizon above answers *"what will this cost in three years?"* The useful
-business question is *"what will this cost next month?"*
+**The naive forecast is unbeaten at every horizon tested, and the reason is
+visible in one number: median MAE at h=1 is exactly 0.0000.**
 
-Model advantage in forecasting is **horizon-dependent**, and a single long
-horizon can only show that everything converges to naive. The next run should
-use `rolling_origin_splits()` at h = 1, 3 and 6 and report a MAE-versus-horizon
-curve. That is where ARIMA and Prophet have a chance to earn their place, and it
-is the standard way forecasting results are reported.
+More than half the series do not change price from one month to the next. Where
+the price is unchanged, "predict the last value" is not merely a good heuristic
+— it is exactly correct, and there is no error left for a model to remove.
 
-Until that runs, the honest claim is: **at a long horizon, no method beats the
-naive baseline on this data.**
+Three things support this being the correct result rather than a broken
+evaluation:
+
+1. **Prices are near-random-walk step functions.** For a random walk the naive
+   forecast is provably optimal. A model beating it by a wide margin would be
+   evidence of leakage, not skill.
+2. **Error grows monotonically with horizon for every model**
+   (naive: 0.0000 → 0.0100 → 0.0333 → 0.0418). Forecasting further ahead is
+   harder, as it must be. An evaluation that did not show this would be suspect.
+3. **The ranking is sensible.** Simple methods beat complex ones on short, noisy,
+   level-shifting series. `seasonal_naive_12` and `mean` lose badly, which is
+   what should happen to a yearly-seasonality assumption on 42-month series with
+   no seasonal structure.
+
+**Fallback rate is 0% for every model**, so no result here is a silently
+degraded naive forecast reported under another model's name.
+
+### What this means practically
+
+The defensible claim from this project is **not** "I built a model that beats
+the baseline." It is:
+
+> Price forecasting on this data is a solved problem at short horizons — the
+> naive forecast achieves zero median error one month ahead — so modelling
+> effort belongs on *when* a price changes, not *what* it changes to.
+
+That points directly at the discount-detection task below, which is where the
+remaining signal is.
+
+## Limitations of this evaluation
+
+**Median MAE hides the tail.** Half the series have zero one-month error, so the
+median reports 0.0000 while the series that *do* move are where all the error
+lives. `reports/horizon_curve.csv` holds the full distribution; a follow-up
+should report the conditional error given a price change occurred.
+
+**Prophet is absent from Run C.** Four horizons x three folds x 56 series is
+~670 Prophet fits, several minutes of compute for a model that placed last in
+Run B. Excluded for iteration speed, not to flatter the result.
+
+**Grocery, not electronics.** Open Prices covers supermarket products. Consumer
+electronics discount more aggressively and more often, so the discount signal
+would likely be stronger there. The licence trade-off (D-006) was accepted
+knowingly.
 
 ---
 
