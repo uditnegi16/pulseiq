@@ -64,3 +64,8 @@ mlflow.db
 mlartifacts/
 reports/*.csv
 reports/*.json
+
+# Fine-tuned LoRA adapter - small enough to commit, and
+# committing it is what makes the result reproducible.
+!models/sentiment_lora/
+!models/sentiment_lora/**
