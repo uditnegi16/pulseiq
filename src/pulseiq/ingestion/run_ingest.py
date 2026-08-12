@@ -9,6 +9,8 @@ Usage (from the project root, venv active):
     python -m pulseiq.ingestion.run_ingest --site books_toscrape --no-mongo
     python -m pulseiq.ingestion.run_ingest --site books_toscrape --dry-run
     python -m pulseiq.ingestion.run_ingest --from-csv data/raw/competitor_data.csv
+    python -m pulseiq.ingestion.run_ingest --open-prices --max-series 200
+    python -m pulseiq.ingestion.run_ingest --open-prices --batch-size 500
 
 --dry-run scrapes and validates but writes nothing, which is how you check a
 selector change before it touches the database.
@@ -79,16 +81,35 @@ def ingest(
     *,
     site: str | None = None,
     csv_path: Path | None = None,
+    open_prices: bool = False,
     use_mongo: bool = True,
     dry_run: bool = False,
     headless: bool | None = None,
+    min_observations: int = 8,
+    max_series: int | None = None,
+    batch_size: int = 1000,
 ) -> int:
     """Run one ingestion pass. Returns a process exit code."""
     run_id = uuid.uuid4().hex[:12]
     logger.info("ingestion run %s starting", run_id)
 
     # --- 1. acquire raw records -------------------------------------------
-    if csv_path is not None:
+    if open_prices:
+        from pulseiq.ingestion.seed_open_prices import (
+            SOURCE,
+            read_open_prices,
+            summarise,
+            transform_open_prices,
+        )
+
+        raw_records = transform_open_prices(
+            read_open_prices(),
+            min_observations=min_observations,
+            max_series=max_series,
+        )
+        source = SOURCE
+        logger.info("open prices: %s", summarise(raw_records))
+    elif csv_path is not None:
         if not csv_path.exists():
             logger.error("csv not found: %s", csv_path)
             return 1
@@ -117,12 +138,22 @@ def ingest(
 
     # --- 2. validate -------------------------------------------------------
     prices, price_report = validate_price_snapshots(raw_records, source=source)
-    review_rows = explode_reviews(raw_records) or raw_records
-    reviews, review_report = validate_reviews(review_rows, source=source)
+
+    # Only look for reviews when the source actually carries them. Price-only
+    # sources (Open Prices, price CSVs) would otherwise report one rejection per
+    # row for "empty_review_text", which is expected behaviour rendered as
+    # hundreds of failures and buries any real problem.
+    review_rows = explode_reviews(raw_records)
+    reviews, review_report = (
+        validate_reviews(review_rows, source=source) if review_rows else ([], None)
+    )
 
     print("\n--- validation ---")
     print("prices :", price_report.summary())
-    print("reviews:", review_report.summary())
+    if review_report is not None:
+        print("reviews:", review_report.summary())
+    else:
+        print("reviews: none in this source")
 
     if dry_run:
         logger.info("dry run -- nothing written")
@@ -131,7 +162,12 @@ def ingest(
     # --- 3. raw documents -> mongo (best effort) ---------------------------
     if use_mongo and mongo.is_configured():
         try:
-            inserted = mongo.insert_raw_documents(raw_records, source=source, run_id=run_id)
+            # Batched: Atlas M0 caps request size, and a single insert_many of
+            # 200k documents would be rejected outright.
+            inserted = 0
+            for start in range(0, len(raw_records), batch_size):
+                chunk = raw_records[start : start + batch_size]
+                inserted += mongo.insert_raw_documents(chunk, source=source, run_id=run_id)
             logger.info("mongo: %d raw documents stored", inserted)
         except Exception:  # noqa: BLE001 - Mongo is the audit trail, not the pipeline
             logger.exception("mongo write failed -- continuing to relational store")
@@ -145,6 +181,7 @@ def ingest(
         price_result = save_price_snapshots(session, prices)
         review_result = save_reviews(session, reviews)
         counts = count_rows(session)
+        logger.info("relational store now holds %s", counts)
 
     print("\n--- written ---")
     print("prices :", price_result)
@@ -163,6 +200,17 @@ def build_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--site", help="site key from ingestion/targets.yaml")
     group.add_argument("--from-csv", type=Path, help="load rows from a CSV instead")
+    group.add_argument(
+        "--open-prices",
+        action="store_true",
+        help="ingest the Open Prices ODbL export (real price history)",
+    )
+
+    parser.add_argument("--min-observations", type=int, default=8)
+    parser.add_argument(
+        "--max-series", type=int, default=None, help="cap series count (open-prices only)"
+    )
+    parser.add_argument("--batch-size", type=int, default=1000, help="documents per Mongo insert")
 
     parser.add_argument("--no-mongo", action="store_true", help="skip the raw document store")
     parser.add_argument("--dry-run", action="store_true", help="validate only, write nothing")
@@ -179,9 +227,13 @@ def main(argv: list[str] | None = None) -> int:
     return ingest(
         site=args.site,
         csv_path=args.from_csv,
+        open_prices=args.open_prices,
         use_mongo=not args.no_mongo,
         dry_run=args.dry_run,
         headless=False if args.show_browser else None,
+        min_observations=args.min_observations,
+        max_series=args.max_series,
+        batch_size=args.batch_size,
     )
 
 

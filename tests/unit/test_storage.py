@@ -260,3 +260,66 @@ class TestEndToEndValidationToStorage:
         assert frame.iloc[0]["selling_price"] == pytest.approx(24999.0)
         assert frame.iloc[0]["discount_pct"] == pytest.approx(16.67, abs=0.01)
         assert list(frame["observed_on"]) == sorted(frame["observed_on"])
+
+
+class TestHealthcheck:
+    """The health check must never raise -- it exists to report, not to fail."""
+
+    def test_masks_credentials_in_uris(self):
+        from pulseiq.storage.healthcheck import _mask
+
+        masked = _mask("mongodb+srv://admin:hunter2@cluster0.abc.mongodb.net/db")
+        assert "hunter2" not in masked
+        assert "admin" not in masked
+        assert "cluster0" in masked
+
+    def test_mask_handles_uris_without_credentials(self):
+        from pulseiq.storage.healthcheck import _mask
+
+        assert _mask("sqlite:///./pulseiq.db") == "sqlite:///./pulseiq.db"
+
+    def test_mask_handles_none(self):
+        from pulseiq.storage.healthcheck import _mask
+
+        assert _mask(None) == "(not set)"
+
+    def test_unconfigured_mongo_skips_rather_than_fails(self):
+        """Mongo is optional by design; absence is not an error."""
+        from pulseiq.storage import healthcheck, mongo
+
+        original = mongo.is_configured
+        try:
+            mongo.is_configured = lambda: False
+            status, detail = healthcheck.check_mongo()
+            assert status == healthcheck.SKIP
+            assert "MONGODB_URI" in detail
+        finally:
+            mongo.is_configured = original
+
+    def test_file_store_mlflow_uri_is_reported_as_a_failure(self):
+        """MLflow 3.15 removed the file store; catching it here beats catching
+        it after a completed training run."""
+        from config.settings import settings
+        from pulseiq.storage import healthcheck
+
+        original = settings.mlflow_tracking_uri
+        try:
+            object.__setattr__(settings, "mlflow_tracking_uri", "file:./mlruns")
+            status, detail = healthcheck.check_mlflow()
+            assert status == healthcheck.FAIL
+            assert "sqlite" in detail
+        finally:
+            object.__setattr__(settings, "mlflow_tracking_uri", original)
+
+
+class TestOpenPricesIngestionPath:
+    def test_price_only_source_does_not_report_review_failures(self):
+        """Price rows have no review text. Reporting one rejection per row was
+        expected behaviour rendered as hundreds of failures."""
+        from pulseiq.ingestion.run_ingest import explode_reviews
+
+        price_rows = [
+            {"product_name": "P1", "price": 10.0, "date": "2026-01-01"},
+            {"product_name": "P2", "price": 20.0, "date": "2026-01-01"},
+        ]
+        assert explode_reviews(price_rows) == []
