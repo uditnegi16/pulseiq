@@ -46,7 +46,7 @@ than `.env`.
 Copy the string. It looks like:
 
 ```
-mongodb+srv://pulseiq_app:<password>@pulseiq.xxxxx.mongodb.net/?retryWrites=true&w=majority
+mongodb+srv://pulseiq_app:<password>@example.invalid/?retryWrites=true&w=majority
 ```
 
 Replace `<password>` with the generated password. If it contains `@`, `:`, `/`
@@ -57,7 +57,7 @@ or `#`, URL-encode those characters or the URI will not parse.
 Add to `.env` (never `.env.example`, never a commit):
 
 ```
-MONGODB_URI=mongodb+srv://pulseiq_app:YOUR_PASSWORD@pulseiq.xxxxx.mongodb.net/?retryWrites=true&w=majority  # pragma: allowlist secret
+MONGODB_URI=mongodb+srv://pulseiq_app:YOUR_PASSWORD@example.invalid/?retryWrites=true&w=majority  # pragma: allowlist secret
 MONGODB_DB=pulseiq
 MONGODB_RAW_COLLECTION=raw_scrapes
 ```

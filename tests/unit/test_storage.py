@@ -244,8 +244,8 @@ class TestEndToEndValidationToStorage:
         raw = [
             {
                 "product_name": "Apple AirPods Pro",
-                "price": "₹24,999.00",
-                "original_price": "₹29,999.00",
+                "price": "â‚¹24,999.00",
+                "original_price": "â‚¹29,999.00",
                 "date": (TODAY - timedelta(days=d)).isoformat(),
             }
             for d in range(3)
@@ -268,10 +268,10 @@ class TestHealthcheck:
     def test_masks_credentials_in_uris(self):
         from pulseiq.storage.healthcheck import _mask
 
-        masked = _mask("mongodb+srv://admin:hunter2@cluster0.abc.mongodb.net/db")
-        assert "hunter2" not in masked
-        assert "admin" not in masked
-        assert "cluster0" in masked
+        masked = _mask("mongodb+srv://EXAMPLE_USER:EXAMPLE_PASSWORD@example.invalid/db")
+        assert "EXAMPLE_PASSWORD" not in masked
+        assert "EXAMPLE_USER" not in masked
+        assert "example.invalid" in masked
 
     def test_mask_handles_uris_without_credentials(self):
         from pulseiq.storage.healthcheck import _mask
