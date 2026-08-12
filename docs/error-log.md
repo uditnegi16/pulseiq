@@ -130,6 +130,85 @@ crediting one model with another's score.
 
 ---
 
+---
+
+## E-007 — `datasets` 4.0 removed `trust_remote_code`, breaking the review loader
+
+**Phase:** 3 · **Caught by:** first Colab run · **Severity:** blocking
+
+```
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'McAuley-Lab/Amazon-Reviews-2023'
+isn't based on a loading script and remove `trust_remote_code`.
+```
+
+The parameter was written from the dataset's own documentation without checking
+it against the installed library version. `datasets` 4.0 removed it entirely and
+now refuses to execute dataset scripts at all.
+
+Dropping the argument would not have helped: the `raw_review_*` configs are
+still script-backed (only `raw_meta_*` were converted to Parquet), so the review
+data is unreachable through `load_dataset` at the canonical repo regardless of
+arguments.
+
+**Fix:** `open_review_stream()` tries Parquet-backed mirrors in order and falls
+through on failure. If every source fails it raises listing each attempt and the
+root cause, rather than propagating whichever exception came last.
+
+**Trade-off accepted:** the mirrors are third-party republications, not the
+McAuley Lab original. Recorded in `docs/decision-log.md` D-012 — provenance
+matters even when the bytes are identical.
+
+**Lesson (third occurrence of this pattern):** verify library APIs against the
+installed version, not against documentation or tutorials. See also E-002
+(Parquet dtypes) and E-005 (MLflow file store).
+
+---
+
+## E-008 — Secret scanner flagged documentation placeholders
+
+**Phase:** 3 · **Caught by:** GitHub secret scanning · **Severity:** false positive
+
+Two alerts on commit `ddf319c`:
+- `docs/mongodb-setup.md:60` — `pulseiq_app:YOUR_PASSWORD@pulseiq.xxxxx.mongodb.net`
+- `tests/unit/test_storage.py:271` — `admin:hunter2@cluster0.abc.mongodb.net`
+
+Both are placeholders. The second is a *test asserting that credentials get
+masked* — the scanner matched the URI shape without evaluating the context.
+
+**Verified before dismissing.** `git log --all -S "<real cluster id>"` returned
+nothing, confirming the live connection string was never committed. Dismissing a
+secret alert without that check would be exactly the wrong instinct.
+
+**Fix:** fixtures now use RFC 2606 reserved names (`example.invalid`,
+`EXAMPLE_USER`, `EXAMPLE_PASSWORD`), which can never resolve and read
+unambiguously as non-real. Alerts closed as "used in tests" / "false positive".
+
+**Lesson:** investigate every alert, then make the fixture obviously fake so it
+cannot recur. Silencing the scanner would have been faster and wrong.
+
+---
+
+## E-009 — Commits silently lost to pre-commit hook aborts
+
+**Phase:** 2-3 · **Caught by:** `git log` audit · **Severity:** process
+
+An entire phase of work (7 files, ~1,900 lines) appeared committed but was not.
+`end-of-file-fixer` and `ruff-format` modify files during the hook run, which
+aborts the commit by design — the modified files need re-staging. `git push`
+then reported `Everything up-to-date`, which reads like success.
+
+Happened three times before being noticed.
+
+**Fix (process, not code):** always finish with `git log --oneline -1` and
+confirm the message is the intended one. `Everything up-to-date` means *nothing
+was committed*, not that everything is fine.
+
+**Lesson:** a tool that "fails" as part of working correctly will be misread as
+success. The verification step has to be explicit.
+
+---
+
 ## Recurring themes
 
 1. **Fixtures encode assumptions.** E-002 and E-003 both passed their tests and
@@ -141,3 +220,8 @@ crediting one model with another's score.
 3. **Strict settings pay for themselves.** Promoting `DeprecationWarning` to an
    error surfaced E-006 immediately. Turning that rule off would have been
    easier and wrong; the ignore is scoped instead.
+4. **Documentation ages faster than code.** E-002, E-005 and E-007 were all
+   caused by trusting a published example over the installed library version.
+   Three occurrences in one project is a pattern, not bad luck.
+5. **Tools that fail as part of succeeding get misread.** E-009 cost a phase of
+   work because an aborted commit and a successful one look similar at a glance.

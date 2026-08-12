@@ -234,3 +234,124 @@ scale-to-zero), App Runner and ElastiCache (both bill while idle).
 MongoDB Atlas M0, Upstash Redis, GitHub Actions and Streamlit Community Cloud
 stay off AWS — their free tiers are permanent and the AWS equivalents cost more
 for less.
+
+---
+
+## D-012 — Review data sourced from Parquet mirrors, not the canonical repo
+
+**Date:** Phase 3
+**Decision:** Load Amazon Reviews'23 through Parquet-backed republications
+rather than `McAuley-Lab/Amazon-Reviews-2023` directly.
+
+**Why:** `datasets` 4.0 removed `trust_remote_code` and no longer executes
+dataset loading scripts. The canonical repo still serves its `raw_review_*`
+configs through a script (only `raw_meta_*` were converted to Parquet), so the
+review data is unreachable through `load_dataset` there regardless of arguments.
+
+**Implementation:** `open_review_stream()` holds an ordered list of sources and
+falls through on failure, so one dead mirror does not block a run. Total failure
+raises listing every attempt plus the root cause.
+
+**Trade-off, stated plainly:** these are third-party copies. The data should be
+byte-identical to the original, but the provenance is one step removed and the
+mirrors could disappear. The alternative — pinning `datasets<4.0` — trades a
+supply-chain risk for a dependency-rot risk, and would eventually conflict with
+`transformers`.
+
+**If both mirrors vanish:** pin `datasets==3.6.0` in a dedicated environment, or
+download the category archives directly from
+`amazon-reviews-2023.github.io` and load from local Parquet.
+
+---
+
+## D-013 — Sentiment labels derived from star ratings, with a stated ceiling
+
+**Date:** Phase 3
+**Decision:** Binary labels from star ratings — 1-2 negative, 4-5 positive,
+3-star reviews dropped entirely.
+
+**Why drop 3 stars:** it is where the star-to-sentiment mapping is least
+trustworthy. A 3-star review is genuinely mixed text; forcing it into a class
+teaches the model that mixed text has a definite label, and keeping it as a
+third class means training on the noisiest examples in the set.
+
+**Why balance the classes:** roughly 80% of Amazon reviews are 4-5 stars. On the
+raw distribution, a model that always predicts "positive" scores 80% and appears
+to work. Balancing makes accuracy an honest metric rather than a restatement of
+the base rate. `majority_baseline()` is reported alongside every result so the
+do-nothing floor is always visible.
+
+**The limitation that must accompany any reported number:** these are *proxy*
+labels. People leave 5 stars with complaints in the text, and 1 star because
+delivery was late on a product they liked. The achievable accuracy ceiling is
+therefore set by label noise, not model capacity. A fine-tune reaching ~92%
+where labels are ~95% faithful has saturated the task; pushing further would be
+fitting the noise.
+
+---
+
+## D-014 — Three-way split; the test set is scored exactly once
+
+**Date:** Phase 3
+**Decision:** train / validation / test at 70/15/15. Checkpoint selection uses
+validation macro-F1. The test set is touched once, at the end.
+
+**Why:** selecting a checkpoint on test performance is the classification
+equivalent of the temporal leakage this project fixed in forecasting (D-005). It
+produces a number that is optimistic by an unknown amount and cannot be
+reproduced on new data.
+
+A random split is correct here, unlike the forecasting task — reviews are
+independent observations with no temporal ordering to respect.
+
+**Enforced, not just intended:** the Trainer receives `eval_dataset=val_ds` and
+never sees the test frame. A test asserts this.
+
+**Splits are persisted to parquet** so the zero-shot baseline and the fine-tuned
+model are scored on byte-identical test data. Regenerating the split between
+runs — even with the same seed but a different sklearn version — would
+invalidate the before/after comparison.
+
+---
+
+## D-015 — LoRA rather than full fine-tuning
+
+**Date:** Phase 3
+**Decision:** Freeze DistilBERT and train LoRA adapters on the attention
+projections (`q_lin`, `v_lin`), r=16, alpha=32.
+
+**Why:**
+1. The adapter is a few MB and can be committed to git. A full checkpoint is
+   ~250MB, which makes the result unreproducible for anyone cloning the repo.
+2. Training fits on a free-tier T4.
+3. The base model is untouched, so the before/after comparison isolates domain
+   adaptation rather than confounding it with catastrophic forgetting.
+
+**Trade-off:** a small accuracy ceiling relative to full fine-tuning. On a binary
+task with proxy labels that ceiling is set by label noise long before it is set
+by LoRA capacity (D-013), so the trade is close to free here.
+
+**Baseline choice matters as much as the method.** The zero-shot comparator is
+`distilbert-base-uncased-finetuned-sst-2-english` — already sentiment-tuned,
+just on movie reviews. Both models are DistilBERT, so the measured delta
+isolates *domain adaptation*. A weaker baseline would have produced a larger and
+less meaningful improvement number.
+
+---
+
+## D-016 — Training compute on Colab, inference local
+
+**Date:** Phase 3
+**Decision:** Fine-tune on a Colab T4 via the official VS Code extension; run
+inference locally on CPU.
+
+**Why:** DistilBERT + LoRA on 20k reviews is ~10 minutes per epoch on a T4
+versus 2-4 hours on a laptop CPU. Fine-tuning needs several runs before the
+numbers are worth reporting, and one-shot experimentation is not experimentation.
+
+**Structure this forces, and it is an improvement:** all logic lives in tested
+modules under `src/`; the notebook clones the repo and calls them. Nothing
+substantive lives in notebook cells. The Colab runtime is a separate machine, so
+the notebook installs dependencies, clones, and downloads the adapter at the end.
+
+**Cost: free.** No Colab Pro, no AWS credits spent.
