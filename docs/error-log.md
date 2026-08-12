@@ -209,6 +209,57 @@ success. The verification step has to be explicit.
 
 ---
 
+---
+
+## E-010 — Notebook variable shadowed by an imported function
+
+**Phase:** 3 · **Caught by:** first fine-tuning run · **Severity:** blocking
+
+```
+TypeError: 'function' object is not subscriptable
+```
+
+The notebook bound `train` to the training DataFrame, then a later cell ran
+`from ...finetune_lora import train`. The import silently rebound the name, so
+`train(train, val)` passed the function as its own first argument.
+
+Notebook-specific: in a module this would be caught by any linter, but notebook
+cells share one namespace across the whole session and execute in whatever order
+the user chooses.
+
+**Fix:** import aliased to `run_training`, frames renamed `train_df` / `val_df` /
+`test_df`, and the recovery cell rebuilds the splits from `frame` with the same
+seed rather than depending on what `train` currently points at.
+
+**Lesson:** in notebooks, never give a DataFrame the same name as anything
+importable. `train`, `test`, `eval`, `input` and `next` are the usual offenders.
+
+---
+
+## E-011 — Colab's preinstalled torchao too old for peft
+
+**Phase:** 3 · **Caught by:** first fine-tuning run · **Severity:** blocking
+
+```
+ImportError: Found an incompatible version of torchao.
+Found version 0.10.0, but only versions above 0.16.0 are supported
+```
+
+peft's LoRA dispatcher calls `is_torchao_available()` unconditionally, and that
+function *raises* on an old version rather than returning False. Colab ships
+torchao 0.10.0 preinstalled. Nothing in this project uses torchao at all — it
+was reached purely as part of peft's dispatcher chain.
+
+**Fix:** upgrade or uninstall torchao, then restart the kernel. Uninstalling is
+the lower-risk option: peft returns early when the package is absent, and
+removing an unused dependency cannot conflict with torch's pins.
+
+**Lesson:** a managed environment's preinstalled packages are part of your
+dependency graph whether you asked for them or not. "Works locally" and "works
+on Colab" are different claims.
+
+---
+
 ## Recurring themes
 
 1. **Fixtures encode assumptions.** E-002 and E-003 both passed their tests and
@@ -225,3 +276,6 @@ success. The verification step has to be explicit.
    Three occurrences in one project is a pattern, not bad luck.
 5. **Tools that fail as part of succeeding get misread.** E-009 cost a phase of
    work because an aborted commit and a successful one look similar at a glance.
+6. **Environments carry dependencies you did not choose.** E-011 was caused by a
+   package neither the project nor the developer installed, reached through a
+   third library's dispatcher chain.

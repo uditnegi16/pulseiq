@@ -118,23 +118,49 @@ discount detection, where the remaining signal is.
 
 ---
 
-## Phase 3 — Sentiment Fine-Tuning 🔄
+## Phase 3 — Sentiment Fine-Tuning ✅
 
 **Delivered**
 - Dataset loader: streaming, star→sentiment labels, class balancing,
-  Parquet mirror fallback
+  Parquet mirror fallback across sources
 - Zero-shot baseline (`distilbert-base-uncased-finetuned-sst-2-english`)
-- LoRA fine-tuning module (DistilBERT, r=16, attention projections)
+- LoRA fine-tuning (DistilBERT, r=16, attention projections)
 - Classification metrics with confusion matrix, macro-F1, majority-class floor,
   and error-reduction reporting
 - Local CPU inference from the trained adapter
-- Colab notebook driver (22 cells) — thin, calls tested modules
+- Colab notebook driver — thin, calls tested modules
 
-**Not yet measured.** The fine-tuning run has not completed. Numbers go here and
-in `docs/metrics.md` when it does; nothing is claimed until then.
+**Measured — test set, n=750**
 
-**Ceiling to report alongside whatever the result is:** labels are star-derived
-proxies (D-013). Accuracy is bounded by label noise, not model capacity.
+| metric | zero-shot | fine-tuned | delta |
+|---|---|---|---|
+| accuracy | 0.8880 | **0.9413** | +0.0533 |
+| precision | 0.9505 | 0.9485 | −0.0020 |
+| recall | 0.8187 | **0.9333** | **+0.1147** |
+| f1 | 0.8797 | **0.9409** | +0.0612 |
+| macro_f1 | 0.8875 | **0.9413** | +0.0539 |
+
+**Error reduction: 47.6%.**
+
+| | |
+|---|---|
+| trainable parameters | 887,042 / 67,842,052 (**1.31%**) |
+| adapter size | **4.27 MB** |
+| training time | **61 seconds**, 3 epochs, Colab T4 |
+| cost | **£0** |
+
+**The finding, not just the number.** The improvement is almost entirely recall:
++11.5 points, against −0.2 on precision. The zero-shot model was *missing
+negative reviews* — SST-2 was tuned on movie criticism, where negativity is
+florid; product complaints are flat and factual, and it read too many as
+neutral-positive. Fine-tuning corrected that without trading away precision.
+
+Visible only because precision and recall were reported separately. An accuracy
+figure alone would have said "+5 points" and hidden the mechanism.
+
+**Ceiling.** Labels are star-derived proxies (D-013). At 94.1% on labels perhaps
+~95% faithful, this is close to saturated; further gains would likely be fitting
+label noise. Reported as a limitation rather than pursued.
 
 ---
 
@@ -162,7 +188,6 @@ the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
 
 | Phase | Work | Estimate |
 |---|---|---|
-| 3 | Run the fine-tune, record before/after | 1h |
 | 4 | Eval harness, `regression_gate.py`, CI metric gate | 2h |
 | 5 | FastAPI + Streamlit + Redis cache + LLM routing | 4–5h |
 | 6 | Integration tests | 1.5h |

@@ -190,12 +190,85 @@ alongside. Accuracy would be ~98% for a model that never predicts a discount.
 
 ---
 
-## Sentiment — not yet run
+---
 
-Phase 3. Baseline (zero-shot) and fine-tuned (DistilBERT + LoRA) results go
-here, with accuracy, F1, precision/recall and a confusion matrix, before and
-after.
+## Sentiment — zero-shot vs LoRA fine-tuned
 
-Labels are derived from star ratings and are therefore **proxy labels**
-(see `docs/decision-log.md` D-007). The achievable ceiling is set by label
-noise, not by the model, and reported numbers must be read with that in mind.
+**Task.** Binary sentiment on Amazon product reviews (Electronics).
+
+**Data.** Amazon Reviews'23 (McAuley Lab), non-commercial research use with
+citation — see `docs/decision-log.md` D-007. 5,000 reviews, class-balanced
+(the raw corpus is ~80% positive; without balancing an "always positive" model
+scores 80% and appears to work). Labels derived from star ratings: 1-2 negative,
+4-5 positive, 3-star dropped.
+
+**Protocol.** 70/15/15 stratified split. Checkpoint selected on **validation**
+macro-F1; the test set (n=750) scored exactly once, at the end, by both models.
+Splits persisted to parquet so both models see byte-identical test data.
+
+**Models.** Both are DistilBERT, so the measured delta isolates *domain
+adaptation* rather than confounding it with model capacity.
+- Zero-shot: `distilbert-base-uncased-finetuned-sst-2-english` (already
+  sentiment-tuned, on movie reviews)
+- Fine-tuned: `distilbert-base-uncased` + LoRA (r=16, alpha=32, `q_lin`/`v_lin`)
+
+### Results (test set, n=750)
+
+| metric | zero-shot | fine-tuned | delta |
+|---|---|---|---|
+| accuracy | 0.8880 | **0.9413** | +0.0533 |
+| precision | 0.9505 | 0.9485 | −0.0020 |
+| recall | 0.8187 | **0.9333** | **+0.1147** |
+| f1 | 0.8797 | **0.9409** | +0.0612 |
+| macro_f1 | 0.8875 | **0.9413** | +0.0539 |
+
+**Error reduction: 47.6%** — nearly half the remaining errors eliminated.
+At high accuracy this is the honest framing; "+5.3 points" understates it.
+
+### Confusion matrix, fine-tuned
+
+|  | pred neg | pred pos |
+|---|---|---|
+| **true neg** | 356 | 19 |
+| **true pos** | 25 | 350 |
+
+Majority-class floor on this balanced set: 50% accuracy.
+
+### Training cost
+
+| | |
+|---|---|
+| trainable parameters | **887,042 / 67,842,052 (1.31%)** |
+| adapter size | **4.27 MB** (vs ~250 MB for a full checkpoint) |
+| training time | **61 seconds**, 3 epochs, Colab T4 |
+| cost | **£0** — free-tier GPU |
+
+The adapter is small enough to commit, so the result is reproducible from the
+repository. A full fine-tuned checkpoint would not be.
+
+### What the numbers actually say
+
+**The gain is almost entirely recall.** Precision moved −0.2 points while recall
+moved +11.5. The zero-shot model was *missing negative reviews*: it was tuned on
+SST-2, where negative sentiment is florid and explicit ("a disaster from start to
+finish"). Product complaints are flat and factual ("battery died in a week"), and
+the SST-2 model read too many of them as neutral-to-positive.
+
+Fine-tuning taught it what dissatisfaction looks like in this domain, without
+giving up precision. That is a specific, defensible domain-adaptation result
+rather than a generic accuracy bump — and it is visible only because precision
+and recall were reported separately.
+
+### Limitations
+
+**Labels are proxies.** Sentiment is derived from star ratings, and people leave
+5 stars with complaints in the text. The achievable ceiling is set by label
+noise, not model capacity. At 94.1% on labels that are perhaps ~95% faithful,
+this run is close to saturated — further gains would likely be fitting the noise
+rather than the signal, and should be treated with suspicion.
+
+**5,000 reviews, one category.** Electronics only. A larger multi-category run
+would test whether the adaptation generalises or is category-specific.
+
+**Single run, no seed variance.** The reported numbers are from one seed. A
+proper study would report mean and spread across several.
