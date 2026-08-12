@@ -280,3 +280,91 @@ class TestCompare:
 
     def test_no_division_by_zero_at_perfect_baseline(self):
         assert compare({"accuracy": 1.0}, {"accuracy": 1.0})["error_reduction_pct"] == 0.0
+
+
+class TestDatasetSourceFallback:
+    """The canonical repo serves reviews via a loading script, which
+    datasets>=4.0 refuses to execute. The loader tries Parquet mirrors in order.
+    """
+
+    @staticmethod
+    def _stub_datasets(monkeypatch, behaviour):
+        import sys
+        import types
+
+        module = types.ModuleType("datasets")
+        module.load_dataset = behaviour
+        monkeypatch.setitem(sys.modules, "datasets", module)
+
+    def test_falls_through_to_the_next_mirror(self, monkeypatch):
+        from pulseiq.training.sentiment.dataset import open_review_stream
+
+        attempted = []
+
+        def behaviour(repo, streaming=False, **kwargs):
+            attempted.append(repo)
+            if len(attempted) == 1:
+                raise RuntimeError("mirror down")
+            return iter([{"rating": 5.0, "title": "Good", "text": "works well"}])
+
+        self._stub_datasets(monkeypatch, behaviour)
+        records = list(open_review_stream())
+
+        assert len(attempted) == 2
+        assert len(records) == 1
+
+    def test_first_record_is_not_consumed_by_validation(self, monkeypatch):
+        """The opener pulls one record to surface lazy failures early; that
+        record must still reach the caller."""
+        from pulseiq.training.sentiment.dataset import open_review_stream
+
+        def behaviour(repo, streaming=False, **kwargs):
+            return iter(
+                [
+                    {"rating": 5.0, "title": "First", "text": "a"},
+                    {"rating": 1.0, "title": "Second", "text": "b"},
+                ]
+            )
+
+        self._stub_datasets(monkeypatch, behaviour)
+        records = list(open_review_stream())
+
+        assert [r["title"] for r in records] == ["First", "Second"]
+
+    def test_all_sources_failing_raises_with_every_attempt_listed(self, monkeypatch):
+        from pulseiq.training.sentiment.dataset import open_review_stream
+
+        def behaviour(repo, streaming=False, **kwargs):
+            raise ConnectionError("network unreachable")
+
+        self._stub_datasets(monkeypatch, behaviour)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            open_review_stream()
+
+        message = str(excinfo.value)
+        assert "bagadbilla" in message
+        assert "nhubao" in message
+        assert "loading script" in message  # explains the root cause
+
+    def test_category_is_substituted_into_source_kwargs(self, monkeypatch):
+        from pulseiq.training.sentiment.dataset import open_review_stream
+
+        captured = {}
+
+        def behaviour(repo, streaming=False, **kwargs):
+            captured.update(kwargs)
+            return iter([{"rating": 5.0, "title": "T", "text": "x"}])
+
+        self._stub_datasets(monkeypatch, behaviour)
+        open_review_stream(category="Books")
+
+        assert "Books" in str(captured)
+
+    def test_no_trust_remote_code_anywhere(self):
+        """Regression: datasets>=4.0 errors on this parameter."""
+        from pathlib import Path
+
+        source = Path("src/pulseiq/training/sentiment/dataset.py").read_text(encoding="utf-8")
+        code_lines = [line for line in source.splitlines() if not line.strip().startswith("#")]
+        assert "trust_remote_code" not in "\n".join(code_lines)

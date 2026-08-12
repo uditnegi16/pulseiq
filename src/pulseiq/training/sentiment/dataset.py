@@ -43,8 +43,22 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# The canonical McAuley-Lab repo still serves `raw_review_*` through a loading
+# script. `datasets` >= 4.0 removed `trust_remote_code` and refuses to execute
+# dataset scripts at all, so that path is dead regardless of arguments.
+#
+# The mirrors below are Parquet-backed copies of the same data, tried in order.
+# The loader falls through on failure, so one unavailable mirror does not block
+# the run.
 HF_DATASET = "McAuley-Lab/Amazon-Reviews-2023"
-DEFAULT_CATEGORY = "raw_review_Electronics"
+DEFAULT_CATEGORY = "Electronics"
+
+DATASET_SOURCES: list[tuple[str, dict]] = [
+    # Parquet re-publication of Amazon Reviews'23, sharded per category.
+    ("bagadbilla/amazon-reviews-2023-trimmed", {"data_dir": "{category}", "split": "train"}),
+    # Full mirror of the original repo, Parquet-converted.
+    ("nhubao/Amazon-Reviews-2023", {"name": "raw_review_{category}", "split": "full"}),
+]
 
 LABEL_NEGATIVE = 0
 LABEL_POSITIVE = 1
@@ -186,6 +200,54 @@ def prepare_rows(
     return rows, stats
 
 
+def open_review_stream(*, category: str = DEFAULT_CATEGORY, sources=None):
+    """Open a streaming iterator over review records, trying mirrors in order.
+
+    Streaming means nothing large is downloaded: records arrive lazily and the
+    caller stops once it has enough. The full corpus is 571M reviews across
+    750GB, so this is not optional.
+
+    On total failure this raises listing every attempt, rather than propagating
+    whichever exception came last -- when all sources are down, knowing which
+    failed and how is the useful information.
+    """
+    from datasets import load_dataset
+
+    sources = sources or DATASET_SOURCES
+    failures: list[str] = []
+
+    for repo_id, kwargs in sources:
+        resolved = {
+            k: (v.format(category=category) if isinstance(v, str) else v) for k, v in kwargs.items()
+        }
+        try:
+            logger.info("trying %s with %s", repo_id, resolved)
+            stream = load_dataset(repo_id, streaming=True, **resolved)
+            # Pull the first record here so a lazy failure surfaces now rather
+            # than halfway through preparation.
+            iterator = iter(stream)
+            first = next(iterator)
+            logger.info("streaming from %s (fields: %s)", repo_id, sorted(first.keys()))
+
+            def chained(first=first, rest=iterator):
+                yield first
+                yield from rest
+
+            return chained()
+        except Exception as exc:  # noqa: BLE001 - fall through to the next mirror
+            message = f"{repo_id}: {type(exc).__name__}: {str(exc)[:150]}"
+            logger.warning("source unavailable -- %s", message)
+            failures.append(message)
+
+    raise RuntimeError(
+        "No review data source available. Tried:\n  "
+        + "\n  ".join(failures)
+        + "\n\nThe canonical McAuley-Lab repo serves raw_review_* via a loading "
+        "script, which datasets>=4.0 refuses to execute. Add a Parquet-backed "
+        "mirror to DATASET_SOURCES, or pin datasets<4.0."
+    )
+
+
 def load_reviews(
     *,
     category: str = DEFAULT_CATEGORY,
@@ -199,14 +261,8 @@ def load_reviews(
     many records to find enough negatives (they are ~20% of the corpus), so the
     default allows 15x the target before giving up.
     """
-    from datasets import load_dataset
-
     scan_limit = scan_limit or max_rows * 15
-    logger.info("streaming %s / %s (scan limit %d)", HF_DATASET, category, scan_limit)
-
-    stream = load_dataset(
-        HF_DATASET, category, split="full", streaming=True, trust_remote_code=True
-    )
+    stream = open_review_stream(category=category)
 
     def limited() -> Iterator[dict[str, Any]]:
         for i, record in enumerate(stream):
