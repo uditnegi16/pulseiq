@@ -27,7 +27,13 @@ param(
     [switch]$NoPush,
     [switch]$SkipTests
 )
-
+# The ruff hooks run from the venv (language: system). Without it active they
+# fail with "Executable `ruff` not found", which looks like a hook bug rather
+# than a missing environment.
+if (-not $env:VIRTUAL_ENV) {
+    Write-Host "!! venv not active -- run .\.venv\Scripts\Activate.ps1 first" -ForegroundColor Red
+    exit 1
+}
 $ErrorActionPreference = "Continue"
 
 function Write-Step($text) { Write-Host "`n>> $text" -ForegroundColor Cyan }
