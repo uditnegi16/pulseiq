@@ -21,6 +21,11 @@ markers = ["slow: long-running tests", "integration: needs external services"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Notebooks are excluded deliberately. Cells contain shell magic (!pip install)
+# and long one-off commands that ruff reads as invalid Python. Linting them
+# enforces module standards on an interactive scratchpad, which is the wrong
+# tool for the job -- all substantive logic lives in src/ and is linted there.
+extend-exclude = ["notebooks/", "*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
