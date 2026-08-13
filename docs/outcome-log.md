@@ -164,6 +164,51 @@ label noise. Reported as a limitation rather than pursued.
 
 ---
 
+## Phase 4 — Evaluation Gate ✅
+
+**Delivered**
+- `evaluation/thresholds.yaml` — versioned metric floors, with the recorded
+  values they derive from and a stated tolerance
+- `evaluation/regression_gate.py` — compares fresh reports against thresholds,
+  fails the build on regression
+- Reference reports committed under `reports/`, so CI has something to compare against
+- Wired into GitHub Actions as a required step
+
+**What it enforces**
+
+| check | rule |
+|---|---|
+| `sentiment.accuracy` | >= 0.91 (recorded 0.9413) |
+| `sentiment.macro_f1` | >= 0.91 (recorded 0.9413) |
+| `sentiment.recall` | >= 0.90 — tighter floor, see below |
+| `sentiment.*_vs_baseline` | must still beat zero-shot 0.8880 |
+| `forecast.mae_h1..h12` | <= 0.01 / 0.02 / 0.05 / 0.07 |
+| `forecast.leakage_tripwire` | no model may beat naive by >25% |
+
+**Two design choices worth defending**
+
+*Recall gets a tighter floor than accuracy.* The fine-tune's entire value was
+recall (+11.5 points, precision flat). A change that trades recall back for
+precision would leave accuracy stable while undoing the actual result — so
+accuracy alone is not a sufficient guard.
+
+*The gate also fails on results that are too good.* Every leakage bug in this
+project's history made metrics look better, never worse (E-003 in particular). A
+downside-only gate would have caught none of them. On near-random-walk price
+data, a model suddenly beating naive by 40% is more likely leakage than skill,
+so >25% improvement fails the build with "verify the split before trusting this".
+
+*Missing reports SKIP rather than fail.* A PR touching only the scraper is not
+blocked because nobody re-ran the fine-tune. `--strict` inverts this for release
+builds, where "we never measured it" is not an acceptable answer.
+
+**Verified against seven scenarios**, including a regressed model, a fine-tune
+that stops beating its baseline, exploded forecast error, an implausible 80%
+improvement, malformed JSON, and a zero-valued baseline (division-by-zero guard —
+naive_last really does score exactly 0.0000 at h=1).
+
+---
+
 ## Test coverage
 
 | Suite | Tests |
@@ -177,7 +222,8 @@ label noise. Reported as a limitation rather than pursued.
 | Sentiment & classification | 59 |
 | Storage & validation | 63 |
 | Scraper | 26 |
-| **Total** | **389** |
+| Regression gate | 24 |
+| **Total** | **416** |
 
 All green locally and in CI on fresh Ubuntu. No external services required —
 the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
@@ -188,7 +234,6 @@ the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
 
 | Phase | Work | Estimate |
 |---|---|---|
-| 4 | Eval harness, `regression_gate.py`, CI metric gate | 2h |
 | 5 | FastAPI + Streamlit + Redis cache + LLM routing | 4–5h |
 | 6 | Integration tests | 1.5h |
 | 7 | Evidently drift monitoring, Docker, deployment | 3h |

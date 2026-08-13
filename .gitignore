@@ -62,8 +62,14 @@ Thumbs.db
 .ipynb_checkpoints/
 mlflow.db
 mlartifacts/
+# Reports are regenerated on every run, so they are ignored by default.
+# The three below are the CI regression gate's reference values -- they must be
+# committed, or the gate has nothing to compare a new run against.
 reports/*.csv
 reports/*.json
+!reports/sentiment_baseline.json
+!reports/sentiment_finetuned.json
+!reports/horizon_curve.csv
 
 # Fine-tuned LoRA adapter - small enough to commit, and
 # committing it is what makes the result reproducible.

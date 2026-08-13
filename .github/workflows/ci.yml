@@ -34,7 +34,11 @@ jobs:
       - name: Unit tests
         run: pytest tests/unit
 
-      # Phase 4: uncomment once the eval harness exists.
-      # Blocks the merge if F1/MAE regress past docs thresholds.
-      # - name: Metric regression gate
-      #   run: python -m pulseiq.evaluation.regression_gate
+      # Fails the build when a model metric regresses past its threshold, or
+      # when a result is implausibly good (the leakage tripwire).
+      #
+      # Committed reports under reports/ are the reference. Checks for models
+      # not re-run in this PR are SKIPPED, not failed -- a change to the scraper
+      # should not be blocked by an un-rerun fine-tune.
+      - name: Metric regression gate
+        run: python -m pulseiq.evaluation.regression_gate

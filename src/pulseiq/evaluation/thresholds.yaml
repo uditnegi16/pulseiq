@@ -1,2 +1,70 @@
-# min_f1 / max_mae thresholds enforced by CI
-# TODO: fill in.
+# =============================================================================
+# Metric thresholds enforced in CI.
+#
+# A pull request that makes a model measurably worse fails the build. This is
+# the model equivalent of a failing unit test: without it, a refactor that
+# quietly drops F1 by five points merges without comment, and the regression is
+# discovered weeks later with no obvious culprit.
+#
+# HOW TO CHANGE THESE
+# -------------------
+# Thresholds are raised when a genuine improvement lands, in the same PR as the
+# improvement, with the new measured value in the commit message. They are
+# lowered only with a written justification in docs/decision-log.md -- lowering
+# a threshold to make a build pass is how a gate becomes decoration.
+#
+# The recorded values come from the runs documented in docs/metrics.md. The
+# minimums sit below them by a deliberate tolerance, because metrics vary run to
+# run with seeds, library versions and data refreshes. A gate that fires on
+# noise gets disabled within a week.
+# =============================================================================
+
+sentiment:
+  # Measured 2026-08-12: accuracy 0.9413, macro_f1 0.9413, recall 0.9333
+  # (5,000 balanced reviews, n=750 test, DistilBERT + LoRA r=16)
+  recorded:
+    accuracy: 0.9413
+    macro_f1: 0.9413
+    recall: 0.9333
+    precision: 0.9485
+
+  minimum:
+    # 3-point tolerance below recorded. Wide enough to absorb seed variance,
+    # tight enough that a real regression cannot hide inside it.
+    accuracy: 0.91
+    macro_f1: 0.91
+    # Recall gets a tighter floor than the others. The entire value of the
+    # fine-tune was recall (+11.5 points, precision flat) -- a change that
+    # trades recall back for precision would keep accuracy stable while undoing
+    # the actual result.
+    recall: 0.90
+
+  # The zero-shot baseline this must beat. Falling below it means the fine-tune
+  # has stopped contributing anything.
+  must_beat_baseline:
+    accuracy: 0.8880
+
+forecasting:
+  # Measured 2026-08-12: naive_last median MAE across 56 series, h=1..12
+  # (Open Prices, monthly grid, expanding-origin evaluation)
+  recorded:
+    mae_h1: 0.0000
+    mae_h3: 0.0100
+    mae_h6: 0.0333
+    mae_h12: 0.0418
+
+  # Maximums, not minimums -- lower error is better. 50% tolerance above
+  # recorded, which is wide, and deliberately so: the forecasting data refreshes
+  # daily from an external source, so the series composition changes between
+  # runs in a way the sentiment test set does not.
+  maximum:
+    mae_h1: 0.0100
+    mae_h3: 0.0200
+    mae_h6: 0.0500
+    mae_h12: 0.0700
+
+  # No model may beat naive by more than this. A large sudden "improvement" on
+  # near-random-walk price data is far more likely to be leakage than skill --
+  # this is a tripwire for the exact bug the project was built to avoid, not a
+  # ceiling on ambition.
+  suspicious_improvement_pct: 25.0

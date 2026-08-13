@@ -355,3 +355,33 @@ substantive lives in notebook cells. The Colab runtime is a separate machine, so
 the notebook installs dependencies, clones, and downloads the adapter at the end.
 
 **Cost: free.** No Colab Pro, no AWS credits spent.
+
+---
+
+## D-017 — Metric thresholds committed, and the gate fails on good news too
+
+**Date:** Phase 4
+**Decision:** `thresholds.yaml` holds versioned metric floors enforced by CI.
+The gate fails a build both when a metric regresses **and** when an improvement
+is implausibly large.
+
+**Why the upside check exists:** every leakage bug in this project made metrics
+look *better*, never worse. E-003 (a global date comparison on a per-product
+split) and the shifted-vs-unshifted rolling mean (0.86 vs 0.95 correlation with
+the target) both improved apparent accuracy. A gate checking only the downside
+would have caught neither. On near-random-walk price data, a model beating naive
+by more than 25% is more likely a broken split than a breakthrough.
+
+**Why recall has a tighter floor than accuracy:** the fine-tune's measured value
+was entirely recall (+11.5 points, precision −0.2). A change trading recall back
+for precision keeps accuracy flat while undoing the result. Guarding the headline
+metric alone would not guard the finding.
+
+**Why missing reports skip rather than fail:** blocking a scraper PR because
+nobody re-ran a fine-tune trains people to bypass the gate. `--strict` exists for
+release builds where the stricter rule is appropriate.
+
+**Governance:** thresholds are raised in the same PR as the improvement that
+justifies them, with the measured value in the commit message. They are lowered
+only with a written justification here. Lowering a threshold to make a build pass
+is how a gate becomes decoration.

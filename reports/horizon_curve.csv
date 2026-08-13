@@ -1,0 +1,17 @@
+model,horizon,mae,smape,n,fallback_rate
+naive_last,1,0.0,,56,0.0
+naive_last,3,0.01,,56,0.0
+naive_last,6,0.0333,,56,0.0
+naive_last,12,0.0418,,56,0.0
+arima_auto,1,0.0087,,56,0.0
+arima_auto,3,0.0205,,56,0.0
+arima_auto,6,0.0428,,56,0.0
+arima_auto,12,0.0623,,56,0.0
+moving_average_3,1,0.0117,,56,0.0
+moving_average_3,3,0.03,,56,0.0
+moving_average_3,6,0.0433,,56,0.0
+moving_average_3,12,0.0633,,56,0.0
+mean,1,0.1557,,56,0.0
+mean,3,0.1727,,56,0.0
+mean,6,0.2073,,56,0.0
+mean,12,0.33,,56,0.0
