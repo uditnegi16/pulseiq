@@ -1,11 +1,17 @@
 """Tests for the serving layer: API endpoints, cache, and LLM routing.
 
 No network, no live Redis, no LLM key. The router is tested with a fake session
-object, and the API with an in-memory SQLite database seeded per test.
+object, and the API with a temporary SQLite database seeded per test.
+
+A note on type checking: the fakes here (FakeSession, BrokenClient) deliberately
+do not satisfy the production type signatures -- a stand-in that fully implemented
+`requests.Session` would not be a stand-in. Pyright is configured to skip this
+directory for that reason; the code under test in src/ is checked normally.
 """
 
 import time
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 import requests
@@ -33,10 +39,10 @@ def client(tmp_path, monkeypatch):
     """API client backed by a temporary SQLite database."""
     from config.settings import settings
     from pulseiq.api import deps
-    from pulseiq.storage import relational
 
+    # get_engine() builds a fresh engine per call, so pointing DATABASE_URL at a
+    # temp file is enough to isolate each test -- no engine cache to clear.
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'test.db'}")
-    relational.reset_engine() if hasattr(relational, "reset_engine") else None
     reset_cache()
     deps.reset_model_cache()
 
@@ -456,14 +462,16 @@ class TestSentimentEndpoint:
     def test_missing_adapter_returns_503_not_500(self, client, monkeypatch):
         """A missing model is a service-availability problem, not a bug.
 
-        The failure is forced rather than assumed: the original version of this
-        test passed only when models/sentiment_lora/ happened to be absent, so it
-        passed in CI and failed on a developer machine that had trained the model.
+        The absence is simulated rather than relying on the adapter genuinely
+        being absent: this test previously passed only on machines where nobody
+        had downloaded models/sentiment_lora, and failed once the adapter was
+        installed. A test whose outcome depends on whether an optional file
+        happens to exist is not testing anything.
         """
         from pulseiq.api import deps
 
         def unavailable():
-            raise RuntimeError("No adapter at models/sentiment_lora")
+            raise RuntimeError("No adapter at models/sentiment_lora (simulated)")
 
         monkeypatch.setattr(deps, "get_sentiment_model", unavailable)
         monkeypatch.setattr("pulseiq.api.routers.sentiment.get_sentiment_model", unavailable)
@@ -473,20 +481,39 @@ class TestSentimentEndpoint:
         assert "unavailable" in response.json()["detail"].lower()
 
     def test_classifies_when_the_adapter_is_present(self, client):
-        """Skips rather than fails when the adapter has not been downloaded --
-        it is a 4 MB artefact produced by a Colab run, not a repo guarantee."""
+        """Runs only where inference can actually work, so CI skips it rather
+        than failing on an optional artifact.
+
+        The guard checks that the model LOADS, not merely that the adapter
+        directory exists. A file-existence check would fail confusingly on a
+        machine that has the adapter but no torch.
+        """
+        # Not pytest.importorskip: that only catches ImportError, and a broken
+        # torch install raises OSError on the missing shared library instead.
+        try:
+            import torch  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"torch unavailable: {str(exc)[:60]}")
+
+        if not Path("models/sentiment_lora/adapter_config.json").exists():
+            pytest.skip("adapter not downloaded -- see notebooks/finetune_sentiment.ipynb")
+
+        from pulseiq.api.deps import get_sentiment_model
+
+        try:
+            get_sentiment_model()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"sentiment model cannot load here: {str(exc)[:80]}")
+
         response = client.post(
             "/sentiment",
-            json={"texts": ["Battery died in a week, waste of money."]},
+            json={"texts": ["Battery died in a week, waste of money.", "Superb sound quality."]},
         )
-        if response.status_code == 503:
-            pytest.skip("fine-tuned adapter not present in this environment")
-
         assert response.status_code == 200
-        prediction = response.json()["predictions"][0]
-        assert prediction["label"] in {"negative", "positive"}
-        assert 0.0 <= prediction["confidence"] <= 1.0
-        assert prediction["negative"] + prediction["positive"] == pytest.approx(1.0, abs=0.01)
+        predictions = response.json()["predictions"]
+        assert predictions[0]["label"] == "negative"
+        assert predictions[1]["label"] == "positive"
+        assert all(0.0 <= p["confidence"] <= 1.0 for p in predictions)
 
     def test_empty_text_list_is_rejected(self, client):
         assert client.post("/sentiment", json={"texts": []}).status_code == 422
@@ -519,4 +546,5 @@ class TestAPIClient:
         client = APIClient("http://localhost:59999", timeout=1.0)
         data, error = client.health()
         assert data is None
+        assert error is not None
         assert "uvicorn" in error

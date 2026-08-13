@@ -15,7 +15,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -88,6 +88,32 @@ class Settings(BaseSettings):
     @property
     def reports_dir(self) -> Path:
         return PROJECT_ROOT / "reports"
+
+    @field_validator(
+        "groq_api_key",
+        "nvidia_nim_api_key",
+        "slack_webhook_url",
+        "mongodb_uri",
+        "redis_url",
+        mode="before",
+    )
+    @classmethod
+    def blank_is_unset(cls, v: object) -> object:
+        """Treat an empty or whitespace-only value as absent.
+
+        `.env.example` ships every optional key blank so the file documents what
+        exists. Copied to `.env`, `REDIS_URL=` is present-but-empty, which
+        pydantic reads as the string "" -- truthy enough to look configured, so
+        the client is handed "" and fails with a confusing scheme error instead
+        of cleanly reporting "not configured".
+
+        NOTE: this validator was accidentally defined twice at one point. Python
+        keeps only the last definition, which silently disabled it for every
+        field. One definition only.
+        """
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     def require(self, field: str) -> str:
         """Fetch a secret that must be present, with a useful error if it isn't.

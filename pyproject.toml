@@ -32,9 +32,11 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.black]
 line-length = 100
+
 [tool.pyright]
-# Notebooks run on the Colab runtime, where torchao and google.colab exist and
-# the local venv is irrelevant. Type-checking them against local packages
-# produces only false positives -- all substantive code lives in src/ and is
-# checked there.
-exclude = ["notebooks", ".venv"]
+# Notebooks target the Colab runtime, where torchao and google.colab exist and
+# the local venv is irrelevant -- checking them locally yields only false
+# positives. Tests are excluded because fakes deliberately violate production
+# type signatures: a stand-in that fully implemented requests.Session would not
+# be a stand-in. Everything in src/ is checked normally.
+exclude = ["notebooks", "tests", ".venv"]

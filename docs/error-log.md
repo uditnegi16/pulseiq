@@ -260,6 +260,60 @@ on Colab" are different claims.
 
 ---
 
+---
+
+## E-012 — A validator defined twice silently disabled itself
+
+**Phase:** 5 · **Caught by:** a spurious Redis warning in test output
+
+```
+Redis init failed (Redis URL must specify one of the following schemes
+(redis://, rediss://, unix://)) -- falling back to in-memory cache
+```
+
+`REDIS_URL=` was blank in `.env`, and the `blank_is_unset` validator in
+`config/settings.py` listed `redis_url` among its fields — so it should have
+become `None`. It did not, because a patch had been applied twice and the
+validator was **defined twice with the same decorator**. Python keeps only the
+last definition, and pydantic registered only that one, so the field list on the
+first was silently discarded.
+
+The symptom was misleading: the error named a URL scheme, which points at the
+value, when the fault was in the validator that should have removed the value.
+The fallback then worked correctly, which made it a warning rather than a
+failure and easy to dismiss.
+
+**Fix:** one definition, with a note in the docstring recording that duplication
+disables it.
+
+**Lesson:** duplicate definitions do not error in Python, they overwrite. A
+patch applied twice can therefore leave code that reads correctly and behaves
+as if it were absent. When a fix appears not to have taken effect, check whether
+it took effect *twice*.
+
+---
+
+## E-013 — An environment-dependent test passed only where the model was absent
+
+**Phase:** 5 · **Caught by:** the first run on a machine with the adapter present
+
+`test_missing_adapter_returns_503_not_500` asserted that `/sentiment` returns
+503. It passed in the sandbox where `models/sentiment_lora/` was empty, and
+failed on the development machine, which had the trained adapter — the endpoint
+correctly returned 200 with a real prediction.
+
+The test asserted an environmental accident rather than a behaviour.
+
+**Fix:** the failure is now forced with `monkeypatch` rather than assumed from
+the filesystem, and a second test covers the success path — skipping, not
+failing, when the adapter is absent, since it is a 4 MB artefact of a Colab run
+rather than something the repository guarantees.
+
+**Lesson:** a test that depends on what happens to be installed is testing the
+machine, not the code. If a precondition matters, force it.
+
+---
+
 ## Recurring themes
 
 1. **Fixtures encode assumptions.** E-002 and E-003 both passed their tests and
@@ -279,3 +333,6 @@ on Colab" are different claims.
 6. **Environments carry dependencies you did not choose.** E-011 was caused by a
    package neither the project nor the developer installed, reached through a
    third library's dispatcher chain.
+7. **Tests must force their preconditions, not inherit them.** E-013 passed and
+   failed on different machines for the same code, because it asserted a
+   property of the filesystem rather than of the software.
