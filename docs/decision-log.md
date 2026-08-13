@@ -385,3 +385,73 @@ release builds where the stricter rule is appropriate.
 justifies them, with the measured value in the commit message. They are lowered
 only with a written justification here. Lowering a threshold to make a build pass
 is how a gate becomes decoration.
+
+---
+
+## D-018 — The dashboard consumes the API; it does not import models
+
+**Date:** Phase 5
+**Decision:** Streamlit talks to FastAPI over HTTP. `app/` imports nothing from
+`pulseiq.training`.
+
+**Why:** three concrete consequences. The model loads once in the API process
+rather than once per Streamlit session (DistilBERT takes several seconds). The UI
+cannot accumulate dependencies on training-time internals, which is how a
+"dashboard" quietly becomes the place business logic lives. And the same
+interface serves a UI, a script or a scheduled job without change.
+
+**Cost:** two processes to run locally, handled by `scripts/run_local.ps1`.
+
+---
+
+## D-019 — Honesty carried in the API payload, not just the docs
+
+**Date:** Phase 5
+**Decision:** Every `/forecast` response includes a `baseline_note` field
+stating that no model beat the naive forecast on this data.
+
+**Why:** the measured finding (median h=1 MAE 0.0000, no model exceeding a 29%
+paired win rate) is the single most important thing about these predictions. A
+caveat that lives only in `docs/metrics.md` will not be read by anyone consuming
+the API, and an endpoint returning an ARIMA number in isolation implies a
+sophistication the evaluation does not support.
+
+The same reasoning drives the LLM system prompt, which explicitly forbids
+predicting specific future prices — a recommendation contradicting the project's
+own findings would be worse than no recommendation.
+
+---
+
+## D-020 — Graded degradation over binary availability
+
+**Date:** Phase 5
+**Decision:** `/health` returns `degraded` when optional components are
+unavailable, and `unavailable` only when the database is unreachable.
+
+**Why:** forecasting works without Mongo, Redis, an LLM key, or the sentiment
+adapter. Reporting a hard failure would remove the service from a load balancer
+for something it can operate without.
+
+**Related choices:**
+- Cache errors are treated as misses. A cache is an optimisation; a Redis
+  timeout should slow a request, not fail it.
+- `/sentiment` returns 503 (not 500) when the adapter is missing — an
+  availability problem, not a bug.
+- `/recommend` returns 503 rather than canned text. Filler is worse than
+  failure, because the caller cannot tell it apart from analysis.
+
+---
+
+## D-021 — LLM fallback restricted to transient failures
+
+**Date:** Phase 5
+**Decision:** The router retries on the next provider for timeouts, rate limits
+and 5xx only. A 4xx stops the chain immediately.
+
+**Why:** retrying a malformed request on a second provider produces the same
+rejection more slowly while consuming another provider's quota. Distinguishing
+transient from permanent is the difference between resilience and thrashing.
+
+Provider error messages are never surfaced verbatim: error bodies can echo the
+request, and the request carries the `Authorization` header. There is a test
+asserting the API key never appears in a raised exception.

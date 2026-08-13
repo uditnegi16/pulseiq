@@ -209,6 +209,57 @@ naive_last really does score exactly 0.0000 at h=1).
 
 ---
 
+## Phase 5 — Serving Layer ✅
+
+**Delivered**
+- FastAPI service: `/health`, `/forecast`, `/forecast/products`,
+  `/forecast/models`, `/sentiment`, `/recommend`, with OpenAPI docs at `/docs`
+- Redis cache with a bounded in-memory fallback
+- Multi-provider LLM routing: Groq primary, NVIDIA NIM fallback
+- Streamlit dashboard consuming the API over HTTP
+- `scripts/run_local.ps1` to start both processes
+
+**Design decisions that carry weight**
+
+*The dashboard consumes the API; it does not import models.* The model loads
+once in one process rather than once per Streamlit session, the UI cannot
+accidentally depend on training internals, and the same interface serves a UI, a
+script or a cron job unchanged.
+
+*Every forecast response carries `baseline_note`.* The measured finding is that
+no model beats the naive forecast on this data. An API returning an ARIMA number
+without that caveat would imply a precision the evaluation does not support, so
+the honesty is in the payload rather than only in the docs.
+
+*Degradation is graded, not binary.* `/health` returns `degraded` when Mongo,
+Redis, the LLM or the sentiment adapter are unavailable, because forecasting
+still works without any of them. A hard failure would pull the service out of a
+load balancer for something it can operate without.
+
+*`/recommend` returns 503 rather than canned text* when no LLM is configured. An
+endpoint that silently returns filler is worse than one that fails: the caller
+cannot distinguish analysis from placeholder.
+
+*Cache failures are misses, not errors.* Every Redis operation swallows
+connection errors and logs them. A cache is an optimisation; propagating a
+timeout as a 500 would make it a liability.
+
+**Verified**
+
+| behaviour | result |
+|---|---|
+| missing adapter | `/sentiment` → 503, not 500 |
+| unknown product | `/forecast` → 404 with a pointer to `/forecast/products` |
+| invalid horizon | 422 |
+| unknown model | 400, listing valid options |
+| no LLM key | `/recommend` → 503 naming the variable to set |
+| repeat request | `cached: false` then `cached: true` |
+| cache keys | vary by product, model and horizon |
+| trending series | naive / drift / ARIMA return genuinely different forecasts |
+| API key leakage | provider errors never contain the key (asserted) |
+
+---
+
 ## Test coverage
 
 | Suite | Tests |
@@ -223,7 +274,8 @@ naive_last really does score exactly 0.0000 at h=1).
 | Storage & validation | 63 |
 | Scraper | 26 |
 | Regression gate | 24 |
-| **Total** | **416** |
+| API, cache, LLM router | 59 |
+| **Total** | **475** |
 
 All green locally and in CI on fresh Ubuntu. No external services required —
 the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
@@ -234,7 +286,6 @@ the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
 
 | Phase | Work | Estimate |
 |---|---|---|
-| 5 | FastAPI + Streamlit + Redis cache + LLM routing | 4–5h |
 | 6 | Integration tests | 1.5h |
 | 7 | Evidently drift monitoring, Docker, deployment | 3h |
 | — | `architecture.md`, `security.md`, `phase-log.md`, README | 2h |
