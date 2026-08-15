@@ -34,6 +34,13 @@ jobs:
       - name: Unit tests
         run: pytest tests/unit
 
+      # Kept as a separate step so a failure names the layer. Unit tests use
+      # fakes on both sides of a boundary and therefore cannot catch a mismatch
+      # at that boundary -- every bug in docs/error-log.md that reached working
+      # code was of exactly that kind.
+      - name: Integration tests
+        run: pytest tests/integration -m integration
+
       # Fails the build when a model metric regresses past its threshold, or
       # when a result is implausibly good (the leakage tripwire).
       #

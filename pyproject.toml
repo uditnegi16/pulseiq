@@ -20,6 +20,14 @@ markers = ["slow: long-running tests", "integration: needs external services"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Applies to BOTH `ruff check` and `ruff format`. Placed under [tool.ruff.lint]
+# it would only affect the linter, and the formatter would still rewrite
+# notebooks -- which is what broke CI.
+#
+# Notebooks are excluded deliberately: cells contain shell magic (!pip install)
+# and long one-off commands that ruff reads as invalid Python. All substantive
+# logic lives in src/ and is linted and formatted there.
+extend-exclude = ["notebooks/", "*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

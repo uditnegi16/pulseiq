@@ -455,3 +455,28 @@ transient from permanent is the difference between resilience and thrashing.
 Provider error messages are never surfaced verbatim: error bodies can echo the
 request, and the request carries the `Authorization` header. There is a test
 asserting the API key never appears in a raised exception.
+
+---
+
+## D-022 — Integration tests as a separate layer, not more unit tests
+
+**Date:** Phase 6
+**Decision:** `tests/integration/` uses real SQLite, real Parquet files with
+`decimal128` columns, and a real FastAPI app. Marked so they can be excluded
+from a fast inner loop, and run as their own CI step.
+
+**Why:** every unit test in this project passed while three real bugs reached
+working code (E-002, E-003, E-013). All three were boundary mismatches, and a
+unit test with a fake on both sides of a boundary cannot detect one. The fake
+agrees with the test's assumption, not with reality.
+
+**What they assert that unit tests structurally cannot:**
+- type conversions surviving a real Parquet round-trip
+- idempotency across two genuine database writes
+- the evaluation gate reading the file names the training code actually writes —
+  a drift here makes the gate skip every check and report success forever
+- `baseline_note` present in the published OpenAPI schema, so the measured
+  caveat is part of the contract
+
+**Cost:** ~15 seconds. `pytest -m "not integration"` skips them during
+development; CI always runs both.

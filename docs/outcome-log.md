@@ -260,6 +260,55 @@ timeout as a 500 would make it a liability.
 
 ---
 
+## Phase 6 — Integration Testing ✅
+
+**Delivered**
+- `tests/integration/test_pipeline.py` — Parquet → validate → SQL → resample →
+  split → models → metrics, on real components
+- `tests/integration/test_api.py` — discovery → forecast → cache → error paths
+  against a real database and a real app instance
+- `tests/conftest.py` — shared `isolated_settings` fixture
+- Separate CI step so a failure names the layer
+
+**Why these exist separately.** Every unit test in this project passes, and
+several real bugs still reached working code. They shared a shape: the pieces
+were correct and the *joins* between them were not.
+
+| bug | what the unit tests missed |
+|---|---|
+| E-002 | fixture used floats; the real Parquet used `Decimal`, and `float / Decimal` raises |
+| E-003 | `split_per_product` produced splits its own leakage check rejected |
+| E-013 | a test asserted a 503 that occurred only when the model happened to be absent |
+
+A unit test with a fake on both sides of a boundary cannot detect a mismatch at
+that boundary. These use real SQLite, real Parquet with `decimal128` columns,
+and the real FastAPI app.
+
+**Properties asserted**
+
+- Decimal → float normalisation survives four modules (E-002 regression guard)
+- Re-ingestion is idempotent: `inserted=N` then `inserted=0, skipped=N`
+- `1,299.50` parses as 1299.50, not 129950 (E-001 regression guard)
+- Splits pass `assert_no_leakage()` on data that came through the database
+- Imputed rows are excluded from scoring — verified by comparing scored row
+  counts with and without the filter
+- Forecast error grows with horizon (the sanity property of any correct evaluation)
+- Product identifiers round-trip exactly (`3001234567890@101` must survive so a
+  client can feed the name back in)
+- The cache returns identical *content*, not merely a `cached: true` flag
+- Cache keys are scoped per model and per horizon
+- `baseline_note` appears in the published OpenAPI schema, so the measured
+  caveat is part of the contract rather than a droppable detail
+- The gate reads the file names and metric keys the training code actually
+  writes — a silent mismatch would make it skip every check and report success
+  forever
+- A fresh clone with an empty database produces no 500s
+
+**Test counts:** 476 unit, 26 integration, 502 total. `pytest -m "not integration"`
+for the fast inner loop.
+
+---
+
 ## Test coverage
 
 | Suite | Tests |
@@ -275,7 +324,10 @@ timeout as a 500 would make it a liability.
 | Scraper | 26 |
 | Regression gate | 24 |
 | API, cache, LLM router | 59 |
-| **Total** | **475** |
+| *(unit subtotal)* | *476* |
+| Integration — pipeline | 12 |
+| Integration — API | 14 |
+| **Total** | **502** |
 
 All green locally and in CI on fresh Ubuntu. No external services required —
 the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
@@ -286,7 +338,6 @@ the suite runs against in-memory SQLite, HTML fixtures, and injected fakes.
 
 | Phase | Work | Estimate |
 |---|---|---|
-| 6 | Integration tests | 1.5h |
 | 7 | Evidently drift monitoring, Docker, deployment | 3h |
 | — | `architecture.md`, `security.md`, `phase-log.md`, README | 2h |
 | — | AWS migration (deferred by design, D-011) | 3–4h |
