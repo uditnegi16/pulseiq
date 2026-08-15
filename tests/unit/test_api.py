@@ -548,3 +548,48 @@ class TestAPIClient:
         assert data is None
         assert error is not None
         assert "uvicorn" in error
+
+
+class TestDashboardSourceHygiene:
+    """Static checks on the Streamlit app.
+
+    Streamlit code is hard to test by execution -- it renders rather than
+    returns. These assert the two structural mistakes that actually happened,
+    both of which were invisible until the page was opened in a browser.
+    """
+
+    @staticmethod
+    def _dashboard_source() -> str:
+        from pathlib import Path
+
+        return (Path(__file__).parents[2] / "app" / "streamlit_app.py").read_text(encoding="utf-8")
+
+    def test_no_conditional_expression_used_as_a_statement(self):
+        """`st.success(...) if cond else st.warning(...)` renders the returned
+        DeltaGenerator's repr into the page -- several hundred lines of API
+        docs where a one-line status indicator should be."""
+        import ast
+
+        tree = ast.parse(self._dashboard_source())
+        offenders = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.IfExp)
+        ]
+        assert not offenders, (
+            f"conditional expression used as a statement at line(s) {offenders}; "
+            f"Streamlit will render the DeltaGenerator repr"
+        )
+
+    def test_dashboard_does_not_import_training_code(self):
+        """The dashboard consumes the API over HTTP (D-018). An import from
+        pulseiq.training would load the model per Streamlit session and couple
+        the UI to training internals."""
+        source = self._dashboard_source()
+        assert "from pulseiq" not in source
+        assert "import pulseiq" not in source
+
+    def test_dashboard_parses(self):
+        import ast
+
+        ast.parse(self._dashboard_source())

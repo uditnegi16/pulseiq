@@ -27,17 +27,29 @@ $api = Start-Process -PassThru -NoNewWindow powershell -ArgumentList @(
     "uvicorn pulseiq.api.main:app --reload --port $ApiPort"
 )
 
-Start-Sleep -Seconds 4
+# Poll rather than sleep once. The API loads DistilBERT at startup, which takes
+# roughly 8 seconds on CPU, so a fixed 4-second wait reported "not responding"
+# for a service that was simply still booting.
+Write-Host "   waiting for the API (it loads the sentiment model on startup)..." -ForegroundColor DarkGray
+$health = $null
+foreach ($attempt in 1..25) {
+    Start-Sleep -Seconds 1
+    try {
+        $health = Invoke-RestMethod "http://localhost:$ApiPort/health" -TimeoutSec 3
+        break
+    } catch {
+        continue
+    }
+}
 
-try {
-    $health = Invoke-RestMethod "http://localhost:$ApiPort/health" -TimeoutSec 10
+if ($health) {
     Write-Host "   API status: $($health.status)" -ForegroundColor Green
     foreach ($c in $health.components) {
         $colour = if ($c.status -eq "ok") { "Green" } else { "Yellow" }
         Write-Host "     $($c.name): $($c.status)" -ForegroundColor $colour
     }
-} catch {
-    Write-Host "   API not responding yet -- check the output above" -ForegroundColor Yellow
+} else {
+    Write-Host "   API did not respond within 25s -- check the output above" -ForegroundColor Yellow
 }
 
 Write-Host "`n   docs: http://localhost:$ApiPort/docs" -ForegroundColor Cyan

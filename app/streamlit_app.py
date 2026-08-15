@@ -48,7 +48,16 @@ with st.sidebar:
         st.stop()
 
     status = health["status"]
-    st.success("All systems OK") if status == "ok" else st.warning(f"Status: {status}")
+    # An if/else STATEMENT, not a conditional expression. Streamlit's methods
+    # return a DeltaGenerator, and a bare expression at module level renders
+    # that object's repr into the page -- which turned a one-line status
+    # indicator into several hundred lines of API documentation.
+    if status == "ok":
+        st.success("All systems OK")
+    elif status == "degraded":
+        st.warning("Status: degraded")
+    else:
+        st.error(f"Status: {status}")
 
     with st.expander("Components", expanded=(status != "ok")):
         for component in health["components"]:
@@ -87,11 +96,15 @@ if page == "Forecast":
             f"{p['product_name']}  ({p['n_observations']} obs)": p["product_name"] for p in products
         }
         selected = st.selectbox("Product", list(options))
+        if selected is None:
+            st.stop()
         product_name = options[selected]
     with middle:
         horizon = st.slider("Months ahead", 1, 12, 3)
     with right:
         model = st.selectbox("Model", list(models))
+        if model is None:
+            st.stop()
 
     st.caption(models.get(model, ""))
 
@@ -162,9 +175,12 @@ elif page == "Sentiment":
 
         for prediction in result["predictions"]:
             confidence = prediction["confidence"]
-            icon = "🟢" if prediction["label"] == "positive" else "🔴"
             if confidence < 0.7:
                 icon = "🟡"
+            elif prediction["label"] == "positive":
+                icon = "🟢"
+            else:
+                icon = "🔴"
             with st.container(border=True):
                 st.write(f"{icon} **{prediction['label']}** — confidence {confidence:.1%}")
                 st.caption(prediction["text"])
