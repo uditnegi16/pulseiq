@@ -42,9 +42,9 @@ with st.sidebar:
     st.caption("Competitor pricing & sentiment")
 
     health, error = client.health()
-    if error:
+    if error or health is None:
         st.error("API unreachable")
-        st.code(error, language=None)
+        st.code(error or "No response from API", language=None)
         st.stop()
 
     status = health["status"]
@@ -68,8 +68,8 @@ if page == "Forecast":
     st.header("Price forecast")
 
     products, error = client.list_products()
-    if error:
-        st.error(error)
+    if error or products is None:
+        st.error(error or "No response from API")
         st.stop()
     if not products:
         st.info(
@@ -96,8 +96,8 @@ if page == "Forecast":
     st.caption(models.get(model, ""))
 
     result, error = client.forecast(product_name, horizon=horizon, model=model)
-    if error:
-        st.error(error)
+    if error or result is None:
+        st.error(error or "No forecast returned")
         st.stop()
 
     a, b, c, d = st.columns(4)
@@ -108,18 +108,26 @@ if page == "Forecast":
     c.metric(f"Forecast (+{horizon}m)", f"{predicted:.2f}", f"{delta:+.2f}")
     d.metric("Served from cache", "yes" if result["cached"] else "no")
 
-    history = pd.DataFrame(
-        {"period": [0], "price": [result["last_observed_price"]], "kind": ["observed"]}
+    # Plot the forecast against the series it extends. A prediction shown on its
+    # own cannot be judged plausible or not -- the earlier version drew a single
+    # anchor point, which made every model look identical.
+    history, history_error = client.price_history(product_name, limit=12)
+
+    observed = (
+        {-len(history) + 1 + i: price for i, price in enumerate(history)}
+        if history
+        else {0: result["last_observed_price"]}
     )
-    future = pd.DataFrame(
-        {
-            "period": [p["period"] for p in result["forecast"]],
-            "price": [p["predicted_price"] for p in result["forecast"]],
-            "kind": "forecast",
-        }
-    )
-    chart_data = pd.concat([history, future]).pivot(index="period", columns="kind", values="price")
+    forecast_points = {p["period"]: p["predicted_price"] for p in result["forecast"]}
+    # Anchor the forecast at period 0 so the two lines join rather than float apart.
+    forecast_points[0] = result["last_observed_price"]
+
+    chart_data = pd.DataFrame({"observed": observed, "forecast": forecast_points}).sort_index()
     st.line_chart(chart_data)
+    st.caption("Period 0 is the last observed month; positive periods are forecast.")
+
+    if history_error:
+        st.caption(f"(History unavailable: {history_error})")
 
     # The finding this project measured, shown where a user would otherwise
     # over-trust the number above.
@@ -142,9 +150,9 @@ elif page == "Sentiment":
 
     if st.button("Classify", type="primary") and texts:
         result, error = client.sentiment(texts)
-        if error:
-            st.error(error)
-            if "unavailable" in error.lower():
+        if error or result is None:
+            st.error(error or "No response from API")
+            if error and "unavailable" in error.lower():
                 st.info(
                     "The fine-tuned adapter is missing. Run "
                     "`notebooks/finetune_sentiment.ipynb` and unzip the result into "
@@ -175,14 +183,17 @@ else:
     st.header("Pricing recommendation")
 
     products, error = client.list_products()
-    if error:
-        st.error(error)
+    if error or products is None:
+        st.error(error or "No response from API")
         st.stop()
     if not products:
         st.info("No products available. Ingest price data first.")
         st.stop()
 
     product_name = st.selectbox("Product", [p["product_name"] for p in products])
+    if product_name is None:
+        st.stop()
+
     context = st.text_area(
         "Additional context (optional)", placeholder="e.g. competitor launched a rival model"
     )
@@ -190,9 +201,9 @@ else:
     if st.button("Generate", type="primary"):
         with st.spinner("Asking the model..."):
             result, error = client.recommend(product_name, context=context or None)
-        if error:
-            st.error(error)
-            if "503" in error or "provider" in error.lower():
+        if error or result is None:
+            st.error(error or "No response from API")
+            if error and ("503" in error or "provider" in error.lower()):
                 st.info("Set GROQ_API_KEY in `.env` to enable recommendations.")
             st.stop()
 

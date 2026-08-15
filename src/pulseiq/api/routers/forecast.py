@@ -98,6 +98,44 @@ def list_products(
     return summaries[:limit]
 
 
+@router.get("/history")
+def price_history(
+    product_name: str,
+    limit: int = Query(default=12, ge=1, le=120),
+    session=Depends(get_db),
+) -> dict:
+    """Recent observed prices for a product, oldest first.
+
+    Exists so the dashboard can plot a forecast against the series it extends.
+    A prediction shown without its history cannot be judged plausible or not.
+    """
+    import pandas as pd
+
+    from pulseiq.features.resample import resample_panel
+    from pulseiq.storage.repository import load_price_history
+
+    frame = load_price_history(session, product_name=product_name)
+    if frame.empty:
+        raise HTTPException(status_code=404, detail=f"No price history for '{product_name}'.")
+
+    grid = resample_panel(frame, freq="MS", min_observed=1, max_fill_periods=3)
+    recent = grid.sort_values("observed_on").tail(limit)
+
+    # to_dict("records") rather than itertuples(): itertuples types every field
+    # as a wide Scalar union, so `.date()` and `float()` cannot be verified
+    # statically. Explicit pd.Timestamp() makes the conversion checkable.
+    return {
+        "product_name": product_name,
+        "history": [
+            {
+                "date": pd.Timestamp(row["observed_on"]).date().isoformat(),
+                "price": float(row["selling_price"]),
+            }
+            for row in recent.to_dict("records")
+        ],
+    }
+
+
 @router.post("", response_model=ForecastResponse)
 def forecast(
     request: ForecastRequest,

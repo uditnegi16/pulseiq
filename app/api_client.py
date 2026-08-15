@@ -73,6 +73,21 @@ class APIClient:
             json={"product_name": product_name, "horizon": horizon, "model": model},
         )
 
+    def price_history(self, product_name: str, limit: int = 12):
+        """Recent observed prices, oldest first.
+
+        Returns (prices, error) like every other method: a chart missing its
+        history should degrade to showing only the forecast, not raise.
+        """
+        data, error = self._request(
+            "GET",
+            "/forecast/history",
+            params={"product_name": product_name, "limit": limit},
+        )
+        if error or data is None:
+            return None, error or "No response from API"
+        return [point["price"] for point in data["history"]], None
+
     def sentiment(self, texts: list[str]):
         return self._request("POST", "/sentiment", json={"texts": texts})
 

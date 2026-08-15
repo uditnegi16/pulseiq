@@ -192,3 +192,46 @@ class TestOpenAPIContract:
         schema = client.get("/openapi.json").json()
         properties = schema["components"]["schemas"]["ForecastResponse"]["properties"]
         assert "baseline_note" in properties
+
+
+class TestPriceHistoryEndpoint:
+    """Backs the dashboard chart. A forecast plotted without the series it
+    extends cannot be judged plausible or not."""
+
+    def test_returns_points_oldest_first(self, client):
+        seed("Widget", n=30)
+        payload = client.get(
+            "/forecast/history", params={"product_name": "Widget", "limit": 12}
+        ).json()
+
+        dates = [point["date"] for point in payload["history"]]
+        assert dates == sorted(dates)
+        assert len(payload["history"]) <= 12
+
+    def test_limit_is_honoured(self, client):
+        seed("Widget", n=30)
+        payload = client.get(
+            "/forecast/history", params={"product_name": "Widget", "limit": 5}
+        ).json()
+        assert len(payload["history"]) == 5
+
+    def test_last_history_point_matches_the_forecast_anchor(self, client):
+        """The chart joins the two lines at period 0. If these disagree the
+        forecast appears to jump discontinuously from the history."""
+        seed("Widget", n=30)
+
+        history = client.get("/forecast/history", params={"product_name": "Widget"}).json()[
+            "history"
+        ]
+        forecast = client.post("/forecast", json={"product_name": "Widget"}).json()
+
+        assert history[-1]["price"] == pytest.approx(forecast["last_observed_price"], abs=0.01)
+
+    def test_unknown_product_returns_404(self, client):
+        assert client.get("/forecast/history", params={"product_name": "nope"}).status_code == 404
+
+    def test_prices_are_json_serialisable_floats(self, client):
+        """Decimal or numpy types would break JSON encoding (see E-002)."""
+        seed("Widget", n=30)
+        payload = client.get("/forecast/history", params={"product_name": "Widget"}).json()
+        assert all(isinstance(point["price"], float) for point in payload["history"])
